@@ -94,7 +94,7 @@ def call_goal(goal: Goal):
 def eq(term1, term2):
     def lam(state: State):
         s = unify(term1, term2, state.subst_map)
-        if s:
+        if s is not None:
             return new_stream(State(s, state.i))
         else:
             return None
@@ -246,13 +246,5 @@ def parent_alt(x, y):
         [eq(x, "Jackie"),eq(y, "Marge")],
     ])
 
-print("Bug!? Where are the children?")
+print("Alternative parent() implementation around cond()")
 print("Children of Homer ->", run(10, lambda q: parent_alt("Homer", q)))
-print("parent(x, y)      -> (x, y) in", run(10, lambda q: call_fresh(lambda x, y: both(eq(q, Cons.list([x, y])), parent(x, y)))))
-print("parent_alt(x, y)  -> (x, y) in", run(10, lambda q: call_fresh(lambda x, y: both(eq(q, Cons.list([x, y])), parent_alt(x, y)))))
-
-# Attempt to prove parent_alt() is equal to parent(), but couldn't do it within the kanren engine.
-# Maybe there is a way to represent sets with some Cons magic.
-intersection = set(run(10, lambda q: call_fresh(lambda x, y: all([eq(q, Cons.list([x, y])), parent(x, y), parent_alt(x, y)]))))
-union = set(run(10, lambda q: call_fresh(lambda x, y: both(eq(q, Cons.list([x, y])), either(parent(x, y), parent_alt(x, y))))))
-assert(intersection == union)
