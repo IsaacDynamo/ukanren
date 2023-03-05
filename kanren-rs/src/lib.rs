@@ -1,4 +1,4 @@
-use std::{rc::Rc, collections::HashMap};
+use std::{rc::Rc, collections::HashMap, fmt::Debug};
 
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
@@ -16,13 +16,13 @@ pub enum Term {
 
 type Mapping = HashMap<u32, Term>;
 
-//#[derive(Debug)]
+#[derive(Clone)]
 pub enum Goal {
     Eq(Term, Term),
     Both(Rc<Goal>, Rc<Goal>),
     Either(Rc<Goal>, Rc<Goal>),
-    Fresh(Box<dyn Fn(&mut State) -> Goal>),
-    Yield(Box<dyn Fn() -> Goal>)
+    Fresh(Rc<dyn Fn(&mut State) -> Goal>),
+    Yield(Rc<dyn Fn() -> Goal>)
 }
 
 impl Into<Term> for i32 {
@@ -64,7 +64,7 @@ fn unify(a: &Term, b: &Term, map: &Mapping) -> Option<Mapping> {
     let b = resolve(b, map);
 
     match (a, b) {
-        (Var(a), Var(b)) if a == b => Some(map.clone()),
+        (Var(a), Var(b)) if *a == *b => Some(map.clone()),
         (Value(a), Value(b)) if *a == *b => Some(map.clone()),
         (Null, Null) => Some(map.clone()),
         (Var(a), b) => Some(extend(a, b, map)),
@@ -96,12 +96,46 @@ pub fn either(a: Goal, b: Goal) -> Goal {
 }
 
 fn append(mut a: Stream, b: Stream) -> Stream {
-    a.extend(b);
-    a
+    if a.is_empty() {
+        b
+    } else if let Some(cont) = a.immature {
+        Stream { mature: a.mature, immature: Some(Box::new(move || append(b, cont()))) }
+    } else {
+        a.mature.extend(b.mature);
+        Stream { mature: a.mature, immature: b.immature }
+    }
 }
 
 fn mappend(goal: &Goal, stream: Stream) -> Stream {
-    stream.iter().map(|state| goal.call(state)).flatten().collect()
+    if stream.is_empty() {
+        stream
+    } else if !stream.mature.is_empty() {
+
+        let s = Stream {
+            mature: Vec::from_iter(stream.mature[1..].iter().cloned()),
+            immature: stream.immature
+        };
+        append(goal.call(&stream.mature[0]), mappend(goal, s))
+
+    } else if let Some(cont) = stream.immature {
+        let goal = goal.clone();
+        let s = Stream {
+            mature: Vec::new(),
+            immature: Some(Box::new(move || mappend(&goal, cont())))
+        };
+
+        s
+    } else {
+        unreachable!()
+    }
+
+
+    // match stream.immature {
+    //     None if stream.mature.is_empty() => stream,
+    //     Some(cont) if stream.mature.is_empty() => {
+
+    //     },
+    // }
 }
 
 #[derive(Default, Debug, Clone)]
@@ -124,12 +158,63 @@ impl State {
     }
 }
 
-type Stream = Vec<State>;
+#[derive(Default)]
+struct Stream {
+    mature: Vec<State>,
+    immature: Option<Box<dyn FnOnce() -> Stream>>,
+}
 
-// enum Stream {
-//     Mature(State),
-//     Immature()
-// }
+impl Debug for Stream {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Stream")
+        .field("mature", &self.mature)
+        .field("immature", &self.immature.as_ref().map(|_| ()))
+        .finish()
+    }
+}
+
+impl Stream {
+    fn is_empty(&self) -> bool {
+        self.mature.is_empty() && self.immature.is_none()
+    }
+}
+
+impl IntoIterator for Stream {
+    type Item = State;
+
+    type IntoIter = StreamIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        Self::IntoIter {
+            mature: self.mature.into_iter(),
+            immature: self.immature,
+        }
+    }
+}
+
+struct StreamIter {
+    mature: std::vec::IntoIter<State>,
+    immature: Option<Box<dyn FnOnce() -> Stream>>,
+}
+
+impl Iterator for StreamIter {
+    type Item = State;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let r = self.mature.next();
+        if r.is_some() {
+            r
+        } else {
+            let immature = self.immature.take();
+            if let Some(cont) = immature {
+                *self = cont().into_iter();
+                self.next()
+            } else {
+                None
+            }
+        }
+    }
+}
 
 impl Goal {
     fn call(&self, state: &State) -> Stream {
@@ -137,10 +222,14 @@ impl Goal {
 
         match self {
             Eq(a, b) => {
-                unify(&a, &b, &state.map)
-                    .map(|map| State { map: map, id: state.id })
-                    .into_iter()
-                    .collect()
+                if let Some(mapping) = unify(&a, &b, &state.map) {
+                    Stream {
+                        mature: vec![State { map: mapping, id: state.id }],
+                        immature: None,
+                    }
+                } else {
+                    Stream::default()
+                }
             },
             Either(a, b) => append(a.call(state), b.call(state)),
             Both(a, b) => mappend(&a, b.call(state)),
@@ -149,7 +238,14 @@ impl Goal {
                 let goal = f(&mut s);
                 goal.call(&s)
             },
-            Yield(f) => todo!(),
+            Yield(cont) => {
+                let state = state.clone();
+                let cont = cont.clone();
+                Stream {
+                    mature: Vec::new(),
+                    immature: Some(Box::new(move || cont().call(&state))),
+                }
+            },
         }
     }
 }
@@ -247,20 +343,20 @@ pub fn query<T>(f: impl Binding<T>) -> Query {
 
 pub fn run<T>(f: impl Binding<T>) -> Vec<Vec<Term>> {
     let q = query(f);
-    q.stream.iter().map(|s| q.vars.iter().map(|v| s.resolve(*v)).collect::<Vec<Term>>() ).collect()
+    q.stream.into_iter().map(|s| q.vars.iter().map(|v| s.resolve(*v)).collect::<Vec<Term>>() ).collect()
 }
 
 pub fn runx<T>(n: usize, f: impl Binding<T>) -> Vec<Vec<Term>> {
     let q = query(f);
-    q.stream.iter().map(|s| q.vars.iter().take(n).map(|v| s.resolve(*v)).collect::<Vec<Term>>() ).collect()
+    q.stream.into_iter().map(|s| q.vars.iter().map(|v| s.resolve(*v)).collect::<Vec<Term>>()).take(n).collect()
 }
 
 pub fn fresh<T>(f: impl Binding<T> + Copy + 'static) -> Goal {
-    Goal::Fresh(Box::new(move |state| f.bind(state).1))
+    Goal::Fresh(Rc::new(move |state| f.bind(state).1))
 }
 
 pub fn jield(f: impl Fn() -> Goal + 'static) -> Goal {
-    Goal::Yield(Box::new(f))
+    Goal::Yield(Rc::new(f))
 }
 
 
@@ -287,8 +383,6 @@ mod tests {
 
     #[test]
     fn test_operators() {
-        //Var::reset();
-
         assert_eq!(format!("{:?}", run(eq(1,1))), "[[]]");
         assert_eq!(format!("{:?}", run(eq(1,2))), "[]");
 
@@ -322,10 +416,41 @@ mod tests {
     fn test_yield() {
 
         fn fives(x: Var) -> Goal {
-            return either(eq(x, 1), jield(move || fives(x)))
+            return either(eq(x, 5), jield(move || fives(x)))
         }
 
-        //println!("{:?}", runx(5, |x| fives(x)));
+        fn sixes(x: Var) -> Goal {
+            return either(eq(x, 6), jield(move || sixes(x)))
+        }
+
+        println!("{:?}", runx(5, |x| fives(x)));
+        println!("{:?}", runx(5, |x| either(fives(x), sixes(x))));
+        println!("{:?}", runx(8, |x, y| both(either(fives(x), sixes(x)), either(eq(y, 7), sixes(y)))));
+    }
+
+
+
+    #[test]
+    fn test_concat() {
+        fn concat(l: Var, r: Var, out: Var) -> Goal {
+
+            println!("{l:?} {r:?} {out:?}");
+
+            return jield(move || fresh(move |a, d, res| cond([
+                vec![eq(NULL, l), eq(r, out)],
+                vec![eq(cons(a, d), l), eq(cons(a, res), out), jield(move || concat(d, r, res))]
+            ])))
+        }
+
+
+        fn l() -> Term {
+            cons(1, cons(2, cons(3, cons(4, NULL))))
+        }
+
+        println!("{:?}", runx(10,  move |x, y| fresh(move |r|
+            both(eq(r, l()),
+            concat(x, y, r))
+        )));
     }
 
 }
