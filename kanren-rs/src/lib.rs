@@ -1,9 +1,8 @@
-use std::{rc::Rc, collections::HashMap, fmt::Debug};
-
+use std::{collections::HashMap, fmt::Debug, rc::Rc};
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
 pub struct Var {
-    id: u32
+    id: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -22,18 +21,18 @@ pub enum Goal {
     Both(Rc<Goal>, Rc<Goal>),
     Either(Rc<Goal>, Rc<Goal>),
     Fresh(Rc<dyn Fn(&mut State) -> Goal>),
-    Yield(Rc<dyn Fn() -> Goal>)
+    Yield(Rc<dyn Fn() -> Goal>),
 }
 
-impl Into<Term> for i32 {
-    fn into(self) -> Term {
-        Term::Value(self)
+impl From<i32> for Term {
+    fn from(i: i32) -> Self {
+        Self::Value(i)
     }
 }
 
-impl Into<Term> for Var {
-    fn into(self) -> Term {
-        Term::Var(self.id)
+impl From<Var> for Term {
+    fn from(var: Var) -> Self {
+        Self::Var(var.id)
     }
 }
 
@@ -46,7 +45,7 @@ fn resolve<'a>(term: &'a Term, map: &'a Mapping) -> &'a Term {
             } else {
                 term
             }
-        },
+        }
         _ => term,
     }
 }
@@ -72,7 +71,7 @@ fn unify(a: &Term, b: &Term, map: &Mapping) -> Option<Mapping> {
         (Cons(a_head, a_tail), Cons(b_head, b_tail)) => {
             let map = unify(a_head, b_head, map)?;
             unify(a_tail, b_tail, &map)
-        },
+        }
         _ => None,
     }
 }
@@ -99,10 +98,16 @@ fn append(mut a: Stream, b: Stream) -> Stream {
     if a.is_empty() {
         b
     } else if let Some(cont) = a.immature {
-        Stream { mature: a.mature, immature: Some(Box::new(move || append(b, cont()))) }
+        Stream {
+            mature: a.mature,
+            immature: Some(Box::new(move || append(b, cont()))),
+        }
     } else {
         a.mature.extend(b.mature);
-        Stream { mature: a.mature, immature: b.immature }
+        Stream {
+            mature: a.mature,
+            immature: b.immature,
+        }
     }
 }
 
@@ -110,25 +115,20 @@ fn mappend(goal: &Goal, stream: Stream) -> Stream {
     if stream.is_empty() {
         stream
     } else if !stream.mature.is_empty() {
-
         let s = Stream {
             mature: Vec::from_iter(stream.mature[1..].iter().cloned()),
-            immature: stream.immature
+            immature: stream.immature,
         };
         append(goal.call(&stream.mature[0]), mappend(goal, s))
-
     } else if let Some(cont) = stream.immature {
         let goal = goal.clone();
-        let s = Stream {
+        Stream {
             mature: Vec::new(),
-            immature: Some(Box::new(move || mappend(&goal, cont())))
-        };
-
-        s
+            immature: Some(Box::new(move || mappend(&goal, cont()))),
+        }
     } else {
         unreachable!()
     }
-
 
     // match stream.immature {
     //     None if stream.mature.is_empty() => stream,
@@ -167,9 +167,9 @@ struct Stream {
 impl Debug for Stream {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Stream")
-        .field("mature", &self.mature)
-        .field("immature", &self.immature.as_ref().map(|_| ()))
-        .finish()
+            .field("mature", &self.mature)
+            .field("immature", &self.immature.as_ref().map(|_| ()))
+            .finish()
     }
 }
 
@@ -222,22 +222,25 @@ impl Goal {
 
         match self {
             Eq(a, b) => {
-                if let Some(mapping) = unify(&a, &b, &state.map) {
+                if let Some(mapping) = unify(a, b, &state.map) {
                     Stream {
-                        mature: vec![State { map: mapping, id: state.id }],
+                        mature: vec![State {
+                            map: mapping,
+                            id: state.id,
+                        }],
                         immature: None,
                     }
                 } else {
                     Stream::default()
                 }
-            },
+            }
             Either(a, b) => append(a.call(state), b.call(state)),
-            Both(a, b) => mappend(&a, b.call(state)),
+            Both(a, b) => mappend(a, b.call(state)),
             Fresh(f) => {
                 let mut s = state.clone();
                 let goal = f(&mut s);
                 goal.call(&s)
-            },
+            }
             Yield(cont) => {
                 let state = state.clone();
                 let cont = cont.clone();
@@ -245,13 +248,13 @@ impl Goal {
                     mature: Vec::new(),
                     immature: Some(Box::new(move || cont().call(&state))),
                 }
-            },
+            }
         }
     }
 }
 
-pub fn all(v: impl IntoIterator<Item=Goal>) -> Goal {
-    fn inner(mut iter: impl Iterator<Item=Goal>) -> Option<Goal> {
+pub fn all(v: impl IntoIterator<Item = Goal>) -> Goal {
+    fn inner(mut iter: impl Iterator<Item = Goal>) -> Option<Goal> {
         let a = iter.next()?;
         match inner(iter) {
             Some(b) => Some(both(a, b)),
@@ -262,8 +265,8 @@ pub fn all(v: impl IntoIterator<Item=Goal>) -> Goal {
     inner(v.into_iter()).unwrap()
 }
 
-pub fn any(v: impl IntoIterator<Item=Goal>) -> Goal {
-    fn inner(mut iter: impl Iterator<Item=Goal>) -> Option<Goal> {
+pub fn any(v: impl IntoIterator<Item = Goal>) -> Goal {
+    fn inner(mut iter: impl Iterator<Item = Goal>) -> Option<Goal> {
         let a = iter.next()?;
         match inner(iter) {
             Some(b) => Some(either(a, b)),
@@ -277,17 +280,16 @@ pub fn any(v: impl IntoIterator<Item=Goal>) -> Goal {
 pub fn cond<T, R>(table: T) -> Goal
 where
     T: IntoIterator<Item = R>,
-    R: IntoIterator<Item = Goal>
+    R: IntoIterator<Item = Goal>,
 {
     any(table.into_iter().map(|goals| all(goals)))
 }
 
 fn deep_resolve(term: &Term, map: &Mapping) -> Term {
-    let term = resolve(&term, map);
+    let term = resolve(term, map);
 
     match term {
-        Term::Cons(a, b) =>
-            cons(deep_resolve(a, map), deep_resolve(b, map)),
+        Term::Cons(a, b) => cons(deep_resolve(a, map), deep_resolve(b, map)),
         _ => term.clone(),
     }
 }
@@ -302,16 +304,14 @@ impl Binding<()> for Goal {
     }
 }
 
-impl<T: Fn(Var) -> Goal> Binding<(Var, )> for T
-{
+impl<T: Fn(Var) -> Goal> Binding<(Var,)> for T {
     fn bind(self, state: &mut State) -> (Vec<Var>, Goal) {
         let x = state.var();
         (vec![x], self(x))
     }
 }
 
-impl<T: Fn(Var, Var) -> Goal> Binding<(Var, Var)> for T
-{
+impl<T: Fn(Var, Var) -> Goal> Binding<(Var, Var)> for T {
     fn bind(self, state: &mut State) -> (Vec<Var>, Goal) {
         let x = state.var();
         let y = state.var();
@@ -319,8 +319,7 @@ impl<T: Fn(Var, Var) -> Goal> Binding<(Var, Var)> for T
     }
 }
 
-impl<T: Fn(Var, Var, Var) -> Goal> Binding<(Var, Var, Var)> for T
-{
+impl<T: Fn(Var, Var, Var) -> Goal> Binding<(Var, Var, Var)> for T {
     fn bind(self, state: &mut State) -> (Vec<Var>, Goal) {
         let x = state.var();
         let y = state.var();
@@ -338,17 +337,24 @@ pub fn query<T>(f: impl Binding<T>) -> Query {
     let mut state = State::default();
     let (vars, goal) = f.bind(&mut state);
     let stream = goal.call(&state);
-    Query {vars, stream}
+    Query { vars, stream }
 }
 
 pub fn run<T>(f: impl Binding<T>) -> Vec<Vec<Term>> {
     let q = query(f);
-    q.stream.into_iter().map(|s| q.vars.iter().map(|v| s.resolve(*v)).collect::<Vec<Term>>() ).collect()
+    q.stream
+        .into_iter()
+        .map(|s| q.vars.iter().map(|v| s.resolve(*v)).collect::<Vec<Term>>())
+        .collect()
 }
 
 pub fn runx<T>(n: usize, f: impl Binding<T>) -> Vec<Vec<Term>> {
     let q = query(f);
-    q.stream.into_iter().map(|s| q.vars.iter().map(|v| s.resolve(*v)).collect::<Vec<Term>>()).take(n).collect()
+    q.stream
+        .into_iter()
+        .map(|s| q.vars.iter().map(|v| s.resolve(*v)).collect::<Vec<Term>>())
+        .take(n)
+        .collect()
 }
 
 pub fn fresh<T>(f: impl Binding<T> + Copy + 'static) -> Goal {
@@ -359,7 +365,6 @@ pub fn jield(f: impl Fn() -> Goal + 'static) -> Goal {
     Goal::Yield(Rc::new(f))
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -369,33 +374,69 @@ mod tests {
         use Term::*;
         let e = Mapping::default();
 
-        assert_eq!(format!("{:?}", unify(&Value(1), &Value(1), &e)),                       "Some({})");
-        assert_eq!(format!("{:?}", unify(&Value(1), &Value(2), &e)),                       "None");
-        assert_eq!(format!("{:?}", unify(&Var(1), &Var(1), &e)),                           "Some({})");
-        assert_eq!(format!("{:?}", unify(&Var(1), &Var(2), &e)),                           "Some({1: Var(2)})");
-        assert_eq!(format!("{:?}", unify(&Null, &Null, &e)),                               "Some({})");
-        assert_eq!(format!("{:?}", unify(&cons(1, 2), &cons(1, 2), &e)),                   "Some({})");
-        assert_eq!(format!("{:?}", unify(&cons(1, 2), &cons(2, 4), &e)),                   "None");
-        assert_eq!(format!("{:?}", unify(&cons(1, NULL), &cons(1, NULL), &e)),             "Some({})");
-        assert_eq!(format!("{:?}", unify(&cons(1, NULL), &cons(1, cons(2, NULL)), &e)),    "None");
-        assert_eq!(format!("{:?}", unify(&cons(1, Var(1)), &cons(1, Var(2)), &e)),         "Some({1: Var(2)})");
+        assert_eq!(format!("{:?}", unify(&Value(1), &Value(1), &e)), "Some({})");
+        assert_eq!(format!("{:?}", unify(&Value(1), &Value(2), &e)), "None");
+        assert_eq!(format!("{:?}", unify(&Var(1), &Var(1), &e)), "Some({})");
+        assert_eq!(
+            format!("{:?}", unify(&Var(1), &Var(2), &e)),
+            "Some({1: Var(2)})"
+        );
+        assert_eq!(format!("{:?}", unify(&Null, &Null, &e)), "Some({})");
+        assert_eq!(
+            format!("{:?}", unify(&cons(1, 2), &cons(1, 2), &e)),
+            "Some({})"
+        );
+        assert_eq!(format!("{:?}", unify(&cons(1, 2), &cons(2, 4), &e)), "None");
+        assert_eq!(
+            format!("{:?}", unify(&cons(1, NULL), &cons(1, NULL), &e)),
+            "Some({})"
+        );
+        assert_eq!(
+            format!("{:?}", unify(&cons(1, NULL), &cons(1, cons(2, NULL)), &e)),
+            "None"
+        );
+        assert_eq!(
+            format!("{:?}", unify(&cons(1, Var(1)), &cons(1, Var(2)), &e)),
+            "Some({1: Var(2)})"
+        );
     }
 
     #[test]
     fn test_operators() {
-        assert_eq!(format!("{:?}", run(eq(1,1))), "[[]]");
-        assert_eq!(format!("{:?}", run(eq(1,2))), "[]");
+        assert_eq!(format!("{:?}", run(eq(1, 1))), "[[]]");
+        assert_eq!(format!("{:?}", run(eq(1, 2))), "[]");
 
-        assert_eq!(format!("{:?}", run(|x|    either(eq(x, 1), eq(x, 1)))),     "[[Value(1)], [Value(1)]]");
-        assert_eq!(format!("{:?}", run(|x|    either(eq(x, 1), eq(x, 2)))),     "[[Value(1)], [Value(2)]]");
-        assert_eq!(format!("{:?}", run(|x, y| either(eq(x, 1), eq(y, 2)))),     "[[Value(1), Var(1)], [Var(0), Value(2)]]");
+        assert_eq!(
+            format!("{:?}", run(|x| either(eq(x, 1), eq(x, 1)))),
+            "[[Value(1)], [Value(1)]]"
+        );
+        assert_eq!(
+            format!("{:?}", run(|x| either(eq(x, 1), eq(x, 2)))),
+            "[[Value(1)], [Value(2)]]"
+        );
+        assert_eq!(
+            format!("{:?}", run(|x, y| either(eq(x, 1), eq(y, 2)))),
+            "[[Value(1), Var(1)], [Var(0), Value(2)]]"
+        );
 
-        assert_eq!(format!("{:?}", run(|x|    both(eq(x, 1), eq(x, 1)))),       "[[Value(1)]]");
-        assert_eq!(format!("{:?}", run(|x|    both(eq(x, 1), eq(x, 2)))),       "[]");
-        assert_eq!(format!("{:?}", run(|x, y| both(eq(x, 1), eq(y, 2)))),       "[[Value(1), Value(2)]]");
+        assert_eq!(
+            format!("{:?}", run(|x| both(eq(x, 1), eq(x, 1)))),
+            "[[Value(1)]]"
+        );
+        assert_eq!(format!("{:?}", run(|x| both(eq(x, 1), eq(x, 2)))), "[]");
+        assert_eq!(
+            format!("{:?}", run(|x, y| both(eq(x, 1), eq(y, 2)))),
+            "[[Value(1), Value(2)]]"
+        );
 
-        assert_eq!(format!("{:?}", run(fresh(|x, y| both(eq(x, 1), eq(y, 2))))),        "[[]]");
-        assert_eq!(format!("{:?}", run(|x| fresh(move |y| both(eq(x, 1), eq(y, 2))))),  "[[Value(1)]]");
+        assert_eq!(
+            format!("{:?}", run(fresh(|x, y| both(eq(x, 1), eq(y, 2))))),
+            "[[]]"
+        );
+        assert_eq!(
+            format!("{:?}", run(|x| fresh(move |y| both(eq(x, 1), eq(y, 2))))),
+            "[[Value(1)]]"
+        );
     }
 
     #[test]
@@ -409,65 +450,74 @@ mod tests {
             ])
         }
 
-        assert_eq!(format!("{:?}", run(|x, y| and(x, y, x))), "[[Value(0), Value(0)], [Value(0), Value(1)], [Value(1), Value(1)]]");
+        assert_eq!(
+            format!("{:?}", run(|x, y| and(x, y, x))),
+            "[[Value(0), Value(0)], [Value(0), Value(1)], [Value(1), Value(1)]]"
+        );
     }
 
     #[test]
     fn test_yield() {
-
         fn fives(x: Var) -> Goal {
-            return either(eq(x, 5), jield(move || fives(x)))
+            return either(eq(x, 5), jield(move || fives(x)));
         }
 
         fn sixes(x: Var) -> Goal {
-            return either(eq(x, 6), jield(move || sixes(x)))
+            return either(eq(x, 6), jield(move || sixes(x)));
         }
 
         println!("{:?}", runx(5, |x| fives(x)));
         println!("{:?}", runx(5, |x| either(fives(x), sixes(x))));
-        println!("{:?}", runx(8, |x, y| both(either(fives(x), sixes(x)), either(eq(y, 7), sixes(y)))));
+        println!(
+            "{:?}",
+            runx(8, |x, y| both(
+                either(fives(x), sixes(x)),
+                either(eq(y, 7), sixes(y))
+            ))
+        );
     }
-
-
 
     #[test]
     fn test_concat() {
         fn concat(l: Var, r: Var, out: Var) -> Goal {
-
             println!("{l:?} {r:?} {out:?}");
 
-            return jield(move || fresh(move |a, d, res| cond([
-                vec![eq(NULL, l), eq(r, out)],
-                vec![eq(cons(a, d), l), eq(cons(a, res), out), jield(move || concat(d, r, res))]
-            ])))
+            return jield(move || {
+                fresh(move |a, d, res| {
+                    cond([
+                        vec![eq(NULL, l), eq(r, out)],
+                        vec![
+                            eq(cons(a, d), l),
+                            eq(cons(a, res), out),
+                            jield(move || concat(d, r, res)),
+                        ],
+                    ])
+                })
+            });
         }
-
 
         fn l() -> Term {
             cons(1, cons(2, cons(3, cons(4, NULL))))
         }
 
-        println!("{:?}", runx(10,  move |x, y| fresh(move |r|
-            both(eq(r, l()),
-            concat(x, y, r))
-        )));
+        println!(
+            "{:?}",
+            runx(10, move |x, y| fresh(move |r| both(
+                eq(r, l()),
+                concat(x, y, r)
+            )))
+        );
     }
-
 }
 
-fn main() {
-    // println!("{:?}", eq(cons(1,2), cons(3, NULL)));
+// println!("{:?}", eq(cons(1,2), cons(3, NULL)));
 
+//println!("{:?}", and(x, y, z));
+// println!("{:?}", call_goal(fresh(|q| both(eq(z, 0), and(q, q, z)))));
+// println!("{:?}", call_goal(and(x, y, x)).iter().map(|s| (s.resolve(x), s.resolve(y))).collect::<Vec<_>>());
+// println!("{:?}", run(|x| and(x, x, x)));
 
-    //println!("{:?}", and(x, y, z));
-    // println!("{:?}", call_goal(fresh(|q| both(eq(z, 0), and(q, q, z)))));
-    // println!("{:?}", call_goal(and(x, y, x)).iter().map(|s| (s.resolve(x), s.resolve(y))).collect::<Vec<_>>());
-    // println!("{:?}", run(|x| and(x, x, x)));
-
-
-    // println!("{:?}", call_goal(eq(1, 1)));
-    // println!("{:?}", call_goal(eq(1, 2)));
-    // println!("{:?}", call_goal(eq(Var(1), Var(1))));
-    // println!("{:?}", call_goal(eq(Var(1), Var(2))));
-
-}
+// println!("{:?}", call_goal(eq(1, 1)));
+// println!("{:?}", call_goal(eq(1, 2)));
+// println!("{:?}", call_goal(eq(Var(1), Var(1))));
+// println!("{:?}", call_goal(eq(Var(1), Var(2))));
