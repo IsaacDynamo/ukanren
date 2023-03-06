@@ -248,3 +248,19 @@ def parent_alt(x, y):
 
 print("Alternative parent() implementation around cond()")
 print("Children of Homer ->", run(10, lambda q: parent_alt("Homer", q)))
+
+
+def yield_forever() -> Goal:
+    return _yield(yield_forever)
+
+def terminates() -> Goal:
+    return both(eq(True, False), yield_forever())
+
+def boom() -> Goal:
+    return both(yield_forever(), eq(True, False))
+
+print("BUG")
+print("There still is issue with the order of evaluation")
+print("Following goals are logically equivalent but one terminates and the other blows the stack")
+print("terminates ->", run(10, lambda x: terminates()))
+print("boom ->", run(10, lambda x: boom()))
