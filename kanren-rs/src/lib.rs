@@ -1,6 +1,6 @@
 mod test;
 
-use std::{collections::HashMap, fmt::Debug, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, fmt::Debug, rc::Rc};
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
 pub struct Var {
@@ -22,8 +22,8 @@ pub enum Goal {
     Eq(Term, Term),
     Both(Rc<Goal>, Rc<Goal>),
     Either(Rc<Goal>, Rc<Goal>),
-    Fresh(Rc<dyn Fn(&mut State) -> Goal>),
-    Yield(Rc<dyn Fn() -> Goal>),
+    Fresh(Rc<dyn Fn(&mut State) -> Goal>, RefCell<Option<Box<Goal>>>),
+    Yield(Rc<dyn Fn() -> Goal>, Rc<RefCell<Option<Goal>>>),
 }
 
 impl From<i32> for Term {
@@ -131,13 +131,6 @@ fn mappend(goal: &Goal, stream: Stream) -> Stream {
     } else {
         unreachable!()
     }
-
-    // match stream.immature {
-    //     None if stream.mature.is_empty() => stream,
-    //     Some(cont) if stream.mature.is_empty() => {
-
-    //     },
-    // }
 }
 
 #[derive(Default, Debug, Clone)]
@@ -161,7 +154,7 @@ impl State {
 }
 
 #[derive(Default)]
-struct Stream {
+pub struct Stream {
     mature: Vec<State>,
     immature: Option<Box<dyn FnOnce() -> Stream>>,
 }
@@ -176,8 +169,17 @@ impl Debug for Stream {
 }
 
 impl Stream {
-    fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.mature.is_empty() && self.immature.is_none()
+    }
+
+    pub fn pull(&mut self) {
+        let immature = self.immature.take();
+        if let Some(cont) = immature {
+            let s = cont();
+            self.mature.extend(s.mature);
+            self.immature = s.immature;
+        }
     }
 }
 
@@ -194,7 +196,7 @@ impl IntoIterator for Stream {
     }
 }
 
-struct StreamIter {
+pub struct StreamIter {
     mature: std::vec::IntoIter<State>,
     immature: Option<Box<dyn FnOnce() -> Stream>>,
 }
@@ -237,18 +239,25 @@ impl Goal {
                 }
             }
             Either(a, b) => append(a.call(state), b.call(state)),
-            Both(a, b) => mappend(a, b.call(state)),
-            Fresh(f) => {
+            Both(a, b) => mappend(b, a.call(state)),
+            Fresh(f, node) => {
                 let mut s = state.clone();
                 let goal = f(&mut s);
-                goal.call(&s)
+                node.replace(Some(Box::new(goal)));
+                node.borrow().as_ref().map(|f| f.call(&s)).unwrap()
             }
-            Yield(cont) => {
+            Yield(cont, node) => {
                 let state = state.clone();
                 let cont = cont.clone();
+                let node = node.clone();
+
                 Stream {
                     mature: Vec::new(),
-                    immature: Some(Box::new(move || cont().call(&state))),
+                    immature: Some(Box::new(move || {
+                        let goal = cont();
+                        node.replace(Some(goal));
+                        node.borrow().as_ref().map(|g| g.call(&state)).unwrap()
+                    })),
                 }
             }
         }
@@ -331,15 +340,16 @@ impl<T: Fn(Var, Var, Var) -> Goal> Binding<(Var, Var, Var)> for T {
 }
 
 pub struct Query {
-    vars: Vec<Var>,
-    stream: Stream,
+    pub goal: Goal,
+    pub vars: Vec<Var>,
+    pub stream: Stream,
 }
 
 pub fn query<T>(f: impl Binding<T>) -> Query {
     let mut state = State::default();
     let (vars, goal) = f.bind(&mut state);
     let stream = goal.call(&state);
-    Query { vars, stream }
+    Query { goal, vars, stream }
 }
 
 pub fn run<T>(f: impl Binding<T>) -> Vec<Vec<Term>> {
@@ -360,9 +370,9 @@ pub fn runx<T>(n: usize, f: impl Binding<T>) -> Vec<Vec<Term>> {
 }
 
 pub fn fresh<T>(f: impl Binding<T> + Copy + 'static) -> Goal {
-    Goal::Fresh(Rc::new(move |state| f.bind(state).1))
+    Goal::Fresh(Rc::new(move |state| f.bind(state).1), RefCell::new(None))
 }
 
 pub fn jield(f: impl Fn() -> Goal + 'static) -> Goal {
-    Goal::Yield(Rc::new(f))
+    Goal::Yield(Rc::new(f), Rc::new(RefCell::new(None)))
 }

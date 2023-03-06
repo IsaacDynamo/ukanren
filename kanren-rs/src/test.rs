@@ -113,8 +113,6 @@ mod tests {
     #[test]
     fn test_concat() {
         fn concat(l: Var, r: Var, out: Var) -> Goal {
-            println!("{l:?} {r:?} {out:?}");
-
             return jield(move || {
                 fresh(move |a, d, res| {
                     cond([
@@ -133,13 +131,55 @@ mod tests {
             cons(1, cons(2, cons(3, cons(4, NULL))))
         }
 
-        // println!(
-        //     "{:?}",
-        //     runx(10, move |x, y| fresh(move |r| both(
-        //         eq(r, l()),
-        //         concat(x, y, r)
-        //     )))
-        // );
+        println!(
+            "{:?}",
+            runx(10, move |x, y| fresh(move |r| both(
+                eq(r, l()),
+                concat(x, y, r)
+            )))
+        );
+
+        let mut q = query(move |x, y| fresh(move |r| both(eq(r, l()), concat(x, y, r))));
+
+        fn print_goal(goal: &Goal) {
+            fn inner(goal: &Goal, depth: usize) {
+                let spacer = " ".repeat(depth);
+                match goal {
+                    Goal::Eq(a, b) => {
+                        println!("{}Eq", spacer);
+                        println!("{} {:?}", spacer, a);
+                        println!("{} {:?}", spacer, b);
+                    }
+                    Goal::Both(a, b) => {
+                        println!("{}Both", spacer);
+                        inner(a, depth + 1);
+                        inner(b, depth + 1)
+                    }
+                    Goal::Either(a, b) => {
+                        println!("{}Either", spacer);
+                        inner(a, depth + 1);
+                        inner(b, depth + 1)
+                    }
+                    Goal::Fresh(_, node) => {
+                        println!("{}Fresh", spacer);
+                        node.borrow().as_ref().map(|g| inner(g, depth + 1));
+                    }
+                    Goal::Yield(_, node) => {
+                        println!("{}Yield", spacer);
+                        node.borrow().as_ref().map(|g| inner(g, depth + 1));
+                    }
+                }
+            }
+
+            inner(goal, 0);
+        }
+
+        for _ in 0..14 {
+            q.stream.pull()
+        }
+
+        print_goal(&q.goal);
+        println!("{:?}", q.stream.mature);
     }
 }
 
