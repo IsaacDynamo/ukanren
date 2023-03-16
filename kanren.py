@@ -259,7 +259,7 @@ def terminates() -> Goal:
 def boom() -> Goal:
     return both(yield_forever(), eq(True, False))
 
-print("BUG")
+print("Implementation limitation!")
 print("There still is issue with the order of evaluation")
 print("Following goals are logically equivalent but one terminates and the other blows the stack")
 print("terminates ->", run(10, lambda x: terminates()))
