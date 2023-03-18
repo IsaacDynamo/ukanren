@@ -182,23 +182,32 @@ mod tests {
         println!("{:?}", q.stream.mature);
     }
 
-
     #[test]
     fn test_set() {
         use crate::display::AsScheme;
 
         fn contains(set: Var, x: Var) -> Goal {
-            fresh(move |head, tail| cond([
-                vec![eq(set, cons(head, tail)), eq(head, x)],
-                vec![eq(set, cons(head, tail)), /*neq(head, val),*/ jield(move || contains(tail, x))],
-            ]))
+            fresh(move |head, tail| {
+                cond([
+                    vec![eq(set, cons(head, tail)), eq(head, x)],
+                    vec![
+                        eq(set, cons(head, tail)),
+                        /*neq(head, val),*/ jield(move || contains(tail, x)),
+                    ],
+                ])
+            })
         }
 
         fn excludes(set: Var, x: Var) -> Goal {
-            fresh(move |head, tail| cond([
-                vec![eq(set, NULL)],
-                vec![eq(set, cons(head, tail)), /*neq(head, val),*/ jield(move || excludes(tail, x))],
-            ]))
+            fresh(move |head, tail| {
+                cond([
+                    vec![eq(set, NULL)],
+                    vec![
+                        eq(set, cons(head, tail)),
+                        /*neq(head, val),*/ jield(move || excludes(tail, x)),
+                    ],
+                ])
+            })
         }
 
         fn set_eq(a: Var, b: Var) -> Goal {
@@ -207,10 +216,16 @@ mod tests {
 
         // Set a is a subset of b
         fn subset(a: Var, b: Var) -> Goal {
-            fresh(move |head, tail| cond([
-                vec![eq(a, NULL)],
-                vec![eq(a, cons(head, tail)), contains(b, head), jield(move || subset(tail, b))]
-            ]))
+            fresh(move |head, tail| {
+                cond([
+                    vec![eq(a, NULL)],
+                    vec![
+                        eq(a, cons(head, tail)),
+                        contains(b, head),
+                        jield(move || subset(tail, b)),
+                    ],
+                ])
+            })
         }
 
         fn superset(a: Var, b: Var) -> Goal {
@@ -218,18 +233,30 @@ mod tests {
         }
 
         fn set_insert(set: Var, x: Var, result: Var) -> Goal {
-            fresh(move |head, tail, c| cond([
-                vec![eq(set, NULL), eq(result, cons(x, NULL))],
-                vec![eq(set, cons(head, tail)), eq(head, x), eq(result, set)],
-                vec![eq(set, cons(head, tail)), /*neq(head, x), */ eq(result, cons(head, c)), jield(move || set_insert(tail, x, c))],
-            ]))
+            fresh(move |head, tail, c| {
+                cond([
+                    vec![eq(set, NULL), eq(result, cons(x, NULL))],
+                    vec![eq(set, cons(head, tail)), eq(head, x), eq(result, set)],
+                    vec![
+                        eq(set, cons(head, tail)),
+                        /*neq(head, x), */ eq(result, cons(head, c)),
+                        jield(move || set_insert(tail, x, c)),
+                    ],
+                ])
+            })
         }
 
         fn set_join(a: Var, b: Var, result: Var) -> Goal {
-            fresh(move |head, tail, c| cond([
-                vec![eq(b, NULL), eq(result, a)],
-                vec![eq(b, cons(head, tail)), set_insert(a, head, c), jield(move || set_join(c, tail, result))]
-            ]))
+            fresh(move |head, tail, c| {
+                cond([
+                    vec![eq(b, NULL), eq(result, a)],
+                    vec![
+                        eq(b, cons(head, tail)),
+                        set_insert(a, head, c),
+                        jield(move || set_join(c, tail, result)),
+                    ],
+                ])
+            })
         }
 
         println!(
@@ -246,7 +273,7 @@ mod tests {
 
         println!(
             "contains: {}",
-            AsScheme(runx(100, |x, y ,z| fresh(move |set, t| all([
+            AsScheme(runx(100, |x, y, z| fresh(move |set, t| all([
                 eq(t, 1),
                 eq(set, cons(1, cons(2, cons(3, NULL)))),
                 contains(set, x),
@@ -281,7 +308,6 @@ mod tests {
             ]))))
         );
 
-
         println!(
             "set_join: {}",
             AsScheme(runx(10, |q| fresh(move |a, b| all([
@@ -290,9 +316,7 @@ mod tests {
                 set_join(a, b, q),
             ]))))
         );
-
     }
-
 }
 
 // println!("{:?}", eq(cons(1,2), cons(3, NULL)));
