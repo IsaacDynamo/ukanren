@@ -1,5 +1,6 @@
 #[cfg(test)]
 mod tests {
+    use crate::display::*;
     use crate::*;
 
     #[test]
@@ -95,11 +96,11 @@ mod tests {
     #[test]
     fn test_yield() {
         fn fives(x: Var) -> Goal {
-            return either(eq(x, 5), jield(move || fives(x)));
+            either(eq(x, 5), jield(move || fives(x)))
         }
 
         fn sixes(x: Var) -> Goal {
-            return either(eq(x, 6), jield(move || sixes(x)));
+            either(eq(x, 6), jield(move || sixes(x)))
         }
 
         println!("{:?}", run(5, |x| fives(x)));
@@ -116,18 +117,16 @@ mod tests {
     #[test]
     fn test_concat() {
         fn concat(l: Var, r: Var, out: Var) -> Goal {
-            return jield(move || {
-                fresh(move |a, d, res| {
-                    cond([
-                        vec![eq(NULL, l), eq(r, out)],
-                        vec![
-                            eq(cons(a, d), l),
-                            eq(cons(a, res), out),
-                            jield(move || concat(d, r, res)),
-                        ],
-                    ])
-                })
-            });
+            fresh(move |a, d, res| {
+                cond([
+                    vec![eq(NULL, l), eq(r, out)],
+                    vec![
+                        eq(cons(a, d), l),
+                        eq(cons(a, res), out),
+                        jield(move || concat(d, r, res)),
+                    ],
+                ])
+            })
         }
 
         fn l() -> Term {
@@ -144,51 +143,16 @@ mod tests {
 
         let mut q = query(move |x, y| fresh(move |r| both(eq(r, l()), concat(x, y, r))));
 
-        fn print_goal(goal: &Goal) {
-            fn inner(goal: &Goal, depth: usize) {
-                let spacer = " ".repeat(depth);
-                match goal {
-                    Goal::Eq(a, b) => {
-                        println!("{}Eq", spacer);
-                        println!("{} {:?}", spacer, a);
-                        println!("{} {:?}", spacer, b);
-                    }
-                    Goal::Both(a, b) => {
-                        println!("{}Both", spacer);
-                        inner(a, depth + 1);
-                        inner(b, depth + 1)
-                    }
-                    Goal::Either(a, b) => {
-                        println!("{}Either", spacer);
-                        inner(a, depth + 1);
-                        inner(b, depth + 1)
-                    }
-                    Goal::Fresh(_, node) => {
-                        println!("{}Fresh", spacer);
-                        node.borrow().as_ref().map(|g| inner(g, depth + 1));
-                    }
-                    Goal::Yield(_, node) => {
-                        println!("{}Yield", spacer);
-                        node.borrow().as_ref().map(|g| inner(g, depth + 1));
-                    }
-                }
-            }
-
-            inner(goal, 0);
-        }
-
         for _ in 0..14 {
             q.stream.pull()
         }
 
-        print_goal(&q.goal);
+        println!("{}", GoalTree(&q.goal));
         println!("{:?}", q.stream.mature);
     }
 
     #[test]
     fn test_set() {
-        use crate::display::AsScheme;
-
         fn contains(set: Var, x: Var) -> Goal {
             fresh(move |head, tail| {
                 cond([

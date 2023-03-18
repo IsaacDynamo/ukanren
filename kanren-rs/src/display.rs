@@ -1,4 +1,4 @@
-use crate::Term;
+use crate::{Goal, Term};
 
 pub struct AsScheme(pub Vec<Vec<Term>>);
 
@@ -48,5 +48,52 @@ impl std::fmt::Display for AsScheme {
             f.write_str(")")?;
         }
         f.write_str(")")
+    }
+}
+
+pub struct GoalTree<'a>(pub &'a Goal);
+
+impl<'a> std::fmt::Display for GoalTree<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        fn inner(goal: &Goal, f: &mut std::fmt::Formatter<'_>, depth: usize) -> std::fmt::Result {
+            let spacer = " ".repeat(depth);
+            match goal {
+                Goal::Eq(a, b) => f.write_fmt(format_args!("{}{:?} == {:?}\n", spacer, a, b)),
+                Goal::Both(a, b) => {
+                    f.write_str(&spacer)?;
+                    f.write_str("Both\n")?;
+                    inner(a, f, depth + 1)?;
+                    inner(b, f, depth + 1)
+                }
+                Goal::Either(a, b) => {
+                    f.write_str(&spacer)?;
+                    f.write_str("Either\n")?;
+                    inner(a, f, depth + 1)?;
+                    inner(b, f, depth + 1)
+                }
+                Goal::Fresh(_, node) => {
+                    f.write_str(&spacer)?;
+                    f.write_str("Fresh\n")?;
+                    if let Some(g) = node.borrow().as_ref() {
+                        inner(g, f, depth + 1)
+                    } else {
+                        f.write_str(&spacer)?;
+                        f.write_str(" -\n")
+                    }
+                }
+                Goal::Yield(_, node) => {
+                    f.write_str(&spacer)?;
+                    f.write_str("Yield\n")?;
+                    if let Some(g) = node.borrow().as_ref() {
+                        inner(g, f, depth + 1)
+                    } else {
+                        f.write_str(&spacer)?;
+                        f.write_str(" -\n")
+                    }
+                }
+            }
+        }
+
+        inner(self.0, f, 0)
     }
 }
