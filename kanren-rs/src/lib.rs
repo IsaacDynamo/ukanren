@@ -5,10 +5,11 @@ use std::{cell::RefCell, collections::HashMap, fmt::Debug, rc::Rc};
 
 // TODO:
 // - neq()
-// - impl Goal
+// - impl Goal + 'recursive' types
 // - Prefer non-yield goals in eval of Both
 // - Add bool and str
 // - Use term arguments in custom goals
+// - Remove StreamIter
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
 pub struct Var {
@@ -133,8 +134,8 @@ pub fn either(a: Goal, b: Goal) -> Goal {
     Goal::Either(Rc::new(a), Rc::new(b))
 }
 
-pub fn fresh<T>(f: impl Binding<T> + Copy + 'static) -> Goal {
-    Goal::Fresh(Rc::new(move |state| f.bind(state).1), RefCell::new(None))
+pub fn fresh<const N: usize>(f: impl Binding<N> + Copy + 'static) -> Goal {
+    Goal::Fresh(Rc::new(move |state| f.bind(state)), RefCell::new(None))
 }
 
 pub fn jield(f: impl Fn() -> Goal + 'static) -> Goal {
@@ -178,15 +179,6 @@ pub struct Stream {
     mature: Vec<State>,
     immature: Option<Box<dyn FnOnce() -> Stream>>,
 }
-
-// impl Debug for Stream {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         f.debug_struct("Stream")
-//             .field("mature", &self.mature)
-//             .field("immature", &self.immature.as_ref().map(|_| ()))
-//             .finish()
-//     }
-// }
 
 impl Stream {
     pub fn is_empty(&self) -> bool {
@@ -321,66 +313,81 @@ impl Iterator for StreamIter {
     }
 }
 
-pub trait Binding<T> {
-    fn bind(self, state: &mut State) -> (Vec<Var>, Goal);
+pub trait Binding<const N: usize> {
+    fn bind(self, state: &mut State) -> Goal;
 }
 
-impl Binding<()> for Goal {
-    fn bind(self, _: &mut State) -> (Vec<Var>, Goal) {
-        (vec![], self)
+impl Binding<0> for Goal {
+    fn bind(self, _: &mut State) -> Goal {
+        self
     }
 }
 
-impl<T: Fn(Var) -> Goal> Binding<(Var,)> for T {
-    fn bind(self, state: &mut State) -> (Vec<Var>, Goal) {
+impl<T: Fn(Var) -> Goal> Binding<1> for T {
+    fn bind(self, state: &mut State) -> Goal {
         let x = state.var();
-        (vec![x], self(x))
+        self(x)
     }
 }
 
-impl<T: Fn(Var, Var) -> Goal> Binding<(Var, Var)> for T {
-    fn bind(self, state: &mut State) -> (Vec<Var>, Goal) {
+impl<T: Fn(Var, Var) -> Goal> Binding<2> for T {
+    fn bind(self, state: &mut State) -> Goal {
         let x = state.var();
         let y = state.var();
-        (vec![x, y], self(x, y))
+        self(x, y)
     }
 }
 
-impl<T: Fn(Var, Var, Var) -> Goal> Binding<(Var, Var, Var)> for T {
-    fn bind(self, state: &mut State) -> (Vec<Var>, Goal) {
+impl<T: Fn(Var, Var, Var) -> Goal> Binding<3> for T {
+    fn bind(self, state: &mut State) -> Goal {
         let x = state.var();
         let y = state.var();
         let z = state.var();
-        (vec![x, y, z], self(x, y, z))
+        self(x, y, z)
     }
 }
 
-pub struct Query {
+pub struct Query<const N: usize> {
     pub goal: Goal,
-    pub vars: Vec<Var>,
     pub stream: Stream,
 }
 
-pub fn query<T>(f: impl Binding<T>) -> Query {
+pub fn query<const N: usize>(f: impl Binding<N>) -> Query<N> {
     let mut state = State::default();
-    let (vars, goal) = f.bind(&mut state);
+    let goal = f.bind(&mut state);
     let stream = goal.call(&state);
-    Query { goal, vars, stream }
+    Query { goal, stream }
 }
 
-pub fn run<T>(f: impl Binding<T>) -> Vec<Vec<Term>> {
+pub fn run_all<const N: usize>(f: impl Binding<N>) -> Vec<Vec<Term>> {
     let q = query(f);
     q.stream
         .into_iter()
-        .map(|s| q.vars.iter().map(|v| s.resolve(*v)).collect::<Vec<Term>>())
+        .map(|s| {
+            (0..N)
+                .map(|v| {
+                    s.resolve(Var {
+                        id: v.try_into().unwrap(),
+                    })
+                })
+                .collect::<Vec<Term>>()
+        })
         .collect()
 }
 
-pub fn runx<T>(n: usize, f: impl Binding<T>) -> Vec<Vec<Term>> {
+pub fn run<const N: usize>(n: usize, f: impl Binding<N>) -> Vec<Vec<Term>> {
     let q = query(f);
     q.stream
         .into_iter()
-        .map(|s| q.vars.iter().map(|v| s.resolve(*v)).collect::<Vec<Term>>())
+        .map(|s| {
+            (0..N)
+                .map(|v| {
+                    s.resolve(Var {
+                        id: v.try_into().unwrap(),
+                    })
+                })
+                .collect::<Vec<Term>>()
+        })
         .take(n)
         .collect()
 }

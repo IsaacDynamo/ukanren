@@ -36,38 +36,41 @@ mod tests {
 
     #[test]
     fn test_operators() {
-        assert_eq!(format!("{:?}", run(eq(1, 1))), "[[]]");
-        assert_eq!(format!("{:?}", run(eq(1, 2))), "[]");
+        assert_eq!(format!("{:?}", run_all(eq(1, 1))), "[[]]");
+        assert_eq!(format!("{:?}", run_all(eq(1, 2))), "[]");
 
         assert_eq!(
-            format!("{:?}", run(|x| either(eq(x, 1), eq(x, 1)))),
+            format!("{:?}", run_all(|x| either(eq(x, 1), eq(x, 1)))),
             "[[Value(1)], [Value(1)]]"
         );
         assert_eq!(
-            format!("{:?}", run(|x| either(eq(x, 1), eq(x, 2)))),
+            format!("{:?}", run_all(|x| either(eq(x, 1), eq(x, 2)))),
             "[[Value(1)], [Value(2)]]"
         );
         assert_eq!(
-            format!("{:?}", run(|x, y| either(eq(x, 1), eq(y, 2)))),
+            format!("{:?}", run_all(|x, y| either(eq(x, 1), eq(y, 2)))),
             "[[Value(1), Var(1)], [Var(0), Value(2)]]"
         );
 
         assert_eq!(
-            format!("{:?}", run(|x| both(eq(x, 1), eq(x, 1)))),
+            format!("{:?}", run_all(|x| both(eq(x, 1), eq(x, 1)))),
             "[[Value(1)]]"
         );
-        assert_eq!(format!("{:?}", run(|x| both(eq(x, 1), eq(x, 2)))), "[]");
+        assert_eq!(format!("{:?}", run_all(|x| both(eq(x, 1), eq(x, 2)))), "[]");
         assert_eq!(
-            format!("{:?}", run(|x, y| both(eq(x, 1), eq(y, 2)))),
+            format!("{:?}", run_all(|x, y| both(eq(x, 1), eq(y, 2)))),
             "[[Value(1), Value(2)]]"
         );
 
         assert_eq!(
-            format!("{:?}", run(fresh(|x, y| both(eq(x, 1), eq(y, 2))))),
+            format!("{:?}", run_all(fresh(|x, y| both(eq(x, 1), eq(y, 2))))),
             "[[]]"
         );
         assert_eq!(
-            format!("{:?}", run(|x| fresh(move |y| both(eq(x, 1), eq(y, 2))))),
+            format!(
+                "{:?}",
+                run_all(|x| fresh(move |y| both(eq(x, 1), eq(y, 2))))
+            ),
             "[[Value(1)]]"
         );
     }
@@ -84,7 +87,7 @@ mod tests {
         }
 
         assert_eq!(
-            format!("{:?}", run(|x, y| and(x, y, x))),
+            format!("{:?}", run_all(|x, y| and(x, y, x))),
             "[[Value(0), Value(0)], [Value(0), Value(1)], [Value(1), Value(1)]]"
         );
     }
@@ -99,11 +102,11 @@ mod tests {
             return either(eq(x, 6), jield(move || sixes(x)));
         }
 
-        println!("{:?}", runx(5, |x| fives(x)));
-        println!("{:?}", runx(5, |x| either(fives(x), sixes(x))));
+        println!("{:?}", run(5, |x| fives(x)));
+        println!("{:?}", run(5, |x| either(fives(x), sixes(x))));
         println!(
             "{:?}",
-            runx(8, |x, y| both(
+            run(8, |x, y| both(
                 either(fives(x), sixes(x)),
                 either(eq(y, 7), sixes(y))
             ))
@@ -133,7 +136,7 @@ mod tests {
 
         println!(
             "{:?}",
-            runx(10, move |x, y| fresh(move |r| both(
+            run(10, move |x, y| fresh(move |r| both(
                 eq(r, l()),
                 concat(x, y, r)
             )))
@@ -261,7 +264,7 @@ mod tests {
 
         println!(
             "contains: {}",
-            AsScheme(runx(10, |set| fresh(move |x, y, z| all([
+            AsScheme(run(10, |set| fresh(move |x, y, z| all([
                 eq(x, 1),
                 eq(y, 2),
                 eq(z, 3),
@@ -273,7 +276,7 @@ mod tests {
 
         println!(
             "contains: {}",
-            AsScheme(runx(100, |x, y, z| fresh(move |set, t| all([
+            AsScheme(run(100, |x, y, z| fresh(move |set, t| all([
                 eq(t, 1),
                 eq(set, cons(1, cons(2, cons(3, NULL)))),
                 contains(set, x),
@@ -284,7 +287,7 @@ mod tests {
 
         println!(
             "excludes: {}",
-            AsScheme(runx(100, |q| fresh(move |s, x| all([
+            AsScheme(run(100, |q| fresh(move |s, x| all([
                 eq(s, cons(1, cons(2, cons(3, NULL)))),
                 eq(x, 2),
                 excludes(s, x),
@@ -293,7 +296,7 @@ mod tests {
 
         println!(
             "set_eq: {}",
-            AsScheme(runx(100, |q| fresh(move |x| all([
+            AsScheme(run(100, |q| fresh(move |x| all([
                 eq(x, cons(1, cons(2, cons(3, NULL)))),
                 set_eq(q, x),
             ]))))
@@ -301,7 +304,7 @@ mod tests {
 
         println!(
             "set_insert: {}",
-            AsScheme(runx(100, |q| fresh(move |s, x| all([
+            AsScheme(run(100, |q| fresh(move |s, x| all([
                 eq(s, cons(1, cons(2, cons(3, NULL)))),
                 eq(x, 3),
                 set_insert(s, x, q),
@@ -310,7 +313,7 @@ mod tests {
 
         println!(
             "set_join: {}",
-            AsScheme(runx(10, |q| fresh(move |a, b| all([
+            AsScheme(run(10, |q| fresh(move |a, b| all([
                 eq(a, cons(1, cons(2, NULL))),
                 eq(b, cons(2, cons(3, NULL))),
                 set_join(a, b, q),
