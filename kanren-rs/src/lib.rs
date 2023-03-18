@@ -1,4 +1,5 @@
 mod test;
+mod display;
 
 use std::{cell::RefCell, collections::HashMap, fmt::Debug, rc::Rc};
 
