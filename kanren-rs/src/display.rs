@@ -1,8 +1,8 @@
 use crate::{Goal, Term};
 
-pub struct AsScheme(pub Vec<Vec<Term>>);
+pub struct AsScheme<const N: usize>(pub Vec<[Term; N]>);
 
-impl std::fmt::Display for AsScheme {
+impl<const N: usize> std::fmt::Display for AsScheme<N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         fn term(t: &Term, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             match t {

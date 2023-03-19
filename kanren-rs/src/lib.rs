@@ -337,15 +337,13 @@ impl<const N: usize> Iterator for Query<N> {
 }
 
 impl<const N: usize> Query<N> {
-    fn resolve(&mut self) -> impl Iterator<Item = Vec<Term>> + '_ {
+    fn resolve(&mut self) -> impl Iterator<Item = [Term; N]> + '_ {
         self.map(|s| {
-            (0..N)
-                .map(|v| {
-                    s.resolve(Var {
-                        id: v.try_into().unwrap(),
-                    })
+            std::array::from_fn(|v| {
+                s.resolve(Var {
+                    id: v.try_into().unwrap(),
                 })
-                .collect::<Vec<Term>>()
+            })
         })
     }
 }
@@ -361,12 +359,12 @@ pub fn query<const N: usize>(f: impl Binding<N>) -> Query<N> {
     }
 }
 
-pub fn run_all<const N: usize>(f: impl Binding<N>) -> Vec<Vec<Term>> {
+pub fn run_all<const N: usize>(f: impl Binding<N>) -> Vec<[Term; N]> {
     let mut q = query(f);
     q.resolve().collect()
 }
 
-pub fn run<const N: usize>(n: usize, f: impl Binding<N>) -> Vec<Vec<Term>> {
+pub fn run<const N: usize>(n: usize, f: impl Binding<N>) -> Vec<[Term; N]> {
     let mut q = query(f);
     q.resolve().take(n).collect()
 }
