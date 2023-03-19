@@ -8,13 +8,13 @@ impl<const N: usize> std::fmt::Display for AsScheme<N> {
             match t {
                 Term::Var(x) => f.write_fmt(format_args!("_{x}")),
                 Term::Value(x) => f.write_fmt(format_args!("{x}")),
+                Term::Null => f.write_str("()"),
                 Term::Cons(head, tail) => {
                     f.write_str("(")?;
                     term(head.as_ref(), f)?;
                     inner(tail.as_ref(), f)?;
                     f.write_str(")")
                 }
-                _ => unreachable!(),
             }
         }
 
