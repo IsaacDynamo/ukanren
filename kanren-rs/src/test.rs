@@ -142,13 +142,9 @@ mod tests {
         );
 
         let mut q = query(move |x, y| fresh(move |r| both(eq(r, l()), concat(x, y, r))));
-
-        for _ in 0..14 {
-            q.stream.pull()
-        }
-
+        let stream = q.resolve().take(20).collect();
         println!("{}", GoalTree(&q.goal));
-        println!("{:?}", q.stream.mature);
+        println!("{}", AsScheme(stream));
     }
 
     #[test]

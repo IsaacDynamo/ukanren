@@ -180,32 +180,17 @@ pub struct Stream {
 }
 
 impl Stream {
-    pub fn is_empty(&self) -> bool {
-        self.mature.is_empty() && self.immature.is_empty()
-    }
-
     pub fn append(&mut self, s: Stream) {
-        self.mature = combine(std::mem::take(&mut self.mature), s.mature);
-        self.immature = combine(std::mem::take(&mut self.immature), s.immature);
-    }
+        fn combine<T>(a: &mut Vec<T>, mut b: Vec<T>) {
+            if a.is_empty() {
+                std::mem::swap(a, &mut b)
+            } else if !b.is_empty() {
+                a.append(&mut b);
+            }
+        }
 
-    pub fn pull(&mut self) {
-        let immature = std::mem::take(&mut self.immature);
-        immature.into_iter().map(|cont| cont()).fold(self, |s, x| {
-            s.append(x);
-            s
-        });
-    }
-}
-
-fn combine<T>(mut a: Vec<T>, mut b: Vec<T>) -> Vec<T> {
-    if a.is_empty() {
-        b
-    } else if b.is_empty() {
-        a
-    } else {
-        a.append(&mut b);
-        a
+        combine(&mut self.mature, s.mature);
+        combine(&mut self.immature, s.immature);
     }
 }
 
@@ -313,7 +298,8 @@ impl<T: Fn(Var, Var, Var) -> Goal> Binding<3> for T {
 pub struct Query<const N: usize> {
     pub goal: Goal,
     pub stream: Stream,
-    pub iter: std::vec::IntoIter<State>,
+    pub mature_iter: std::vec::IntoIter<State>,
+    pub immature_iter: std::vec::IntoIter<Box<dyn FnOnce() -> Stream>>,
 }
 
 impl<const N: usize> Iterator for Query<N> {
@@ -321,16 +307,21 @@ impl<const N: usize> Iterator for Query<N> {
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            let r = self.iter.next();
-            if r.is_some() {
-                return r;
+            let state = self.mature_iter.next();
+            if state.is_some() {
+                return state;
             } else if !self.stream.mature.is_empty() {
                 let mature = std::mem::take(&mut self.stream.mature);
-                self.iter = mature.into_iter();
-            } else if !self.stream.immature.is_empty() {
-                self.stream.pull();
+                self.mature_iter = mature.into_iter();
             } else {
-                return None;
+                if let Some(cont) = self.immature_iter.next() {
+                    self.stream.append(cont());
+                } else if !self.stream.immature.is_empty() {
+                    let immature = std::mem::take(&mut self.stream.immature);
+                    self.immature_iter = immature.into_iter();
+                } else {
+                    return None;
+                }
             }
         }
     }
@@ -355,7 +346,8 @@ pub fn query<const N: usize>(f: impl Binding<N>) -> Query<N> {
     Query {
         goal,
         stream,
-        iter: Vec::new().into_iter(),
+        mature_iter: Vec::new().into_iter(),
+        immature_iter: Vec::new().into_iter(),
     }
 }
 
