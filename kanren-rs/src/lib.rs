@@ -9,7 +9,6 @@ use std::{cell::RefCell, collections::HashMap, fmt::Debug, rc::Rc};
 // - Prefer non-yield goals in eval of Both
 // - Add bool and str
 // - Use term arguments in custom goals
-// - Remove StreamIter
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
 pub struct Var {
@@ -177,59 +176,60 @@ where
 #[derive(Default)]
 pub struct Stream {
     mature: Vec<State>,
-    immature: Option<Box<dyn FnOnce() -> Stream>>,
+    immature: Vec<Box<dyn FnOnce() -> Stream>>,
 }
 
 impl Stream {
     pub fn is_empty(&self) -> bool {
-        self.mature.is_empty() && self.immature.is_none()
+        self.mature.is_empty() && self.immature.is_empty()
+    }
+
+    pub fn append(&mut self, s: Stream) {
+        self.mature = combine(std::mem::take(&mut self.mature), s.mature);
+        self.immature = combine(std::mem::take(&mut self.immature), s.immature);
     }
 
     pub fn pull(&mut self) {
-        let immature = self.immature.take();
-        if let Some(cont) = immature {
-            let s = cont();
-            self.mature.extend(s.mature);
-            self.immature = s.immature;
-        }
+        let immature = std::mem::take(&mut self.immature);
+        immature.into_iter().map(|cont| cont()).fold(self, |s, x| {
+            s.append(x);
+            s
+        });
     }
 }
 
-fn append(mut a: Stream, b: Stream) -> Stream {
+fn combine<T>(mut a: Vec<T>, mut b: Vec<T>) -> Vec<T> {
     if a.is_empty() {
         b
-    } else if let Some(cont) = a.immature {
-        Stream {
-            mature: a.mature,
-            immature: Some(Box::new(move || append(b, cont()))),
-        }
+    } else if b.is_empty() {
+        a
     } else {
-        a.mature.extend(b.mature);
-        Stream {
-            mature: a.mature,
-            immature: b.immature,
-        }
+        a.append(&mut b);
+        a
     }
+}
+
+fn append(a: Stream, b: Stream) -> Stream {
+    let mut a = a;
+    a.append(b);
+    a
 }
 
 fn mappend(goal: &Goal, stream: Stream) -> Stream {
-    if stream.is_empty() {
-        stream
-    } else if !stream.mature.is_empty() {
-        let s = Stream {
-            mature: Vec::from_iter(stream.mature[1..].iter().cloned()),
-            immature: stream.immature,
-        };
-        append(goal.call(&stream.mature[0]), mappend(goal, s))
-    } else if let Some(cont) = stream.immature {
+    let mut result = stream
+        .mature
+        .into_iter()
+        .map(|state| goal.call(&state))
+        .fold(Stream::default(), append);
+
+    for cont in stream.immature {
         let goal = goal.clone();
-        Stream {
-            mature: Vec::new(),
-            immature: Some(Box::new(move || mappend(&goal, cont()))),
-        }
-    } else {
-        unreachable!()
+        result
+            .immature
+            .push(Box::new(move || mappend(&goal, cont())))
     }
+
+    result
 }
 
 impl Goal {
@@ -244,7 +244,7 @@ impl Goal {
                             map: mapping,
                             id: state.id,
                         }],
-                        immature: None,
+                        immature: Vec::new(),
                     }
                 } else {
                     Stream::default()
@@ -265,49 +265,12 @@ impl Goal {
 
                 Stream {
                     mature: Vec::new(),
-                    immature: Some(Box::new(move || {
+                    immature: vec![Box::new(move || {
                         let goal = cont();
                         node.replace(Some(goal));
                         node.borrow().as_ref().map(|g| g.call(&state)).unwrap()
-                    })),
+                    })],
                 }
-            }
-        }
-    }
-}
-
-impl IntoIterator for Stream {
-    type Item = State;
-
-    type IntoIter = StreamIter;
-
-    fn into_iter(self) -> Self::IntoIter {
-        Self::IntoIter {
-            mature: self.mature.into_iter(),
-            immature: self.immature,
-        }
-    }
-}
-
-pub struct StreamIter {
-    mature: std::vec::IntoIter<State>,
-    immature: Option<Box<dyn FnOnce() -> Stream>>,
-}
-
-impl Iterator for StreamIter {
-    type Item = State;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let r = self.mature.next();
-        if r.is_some() {
-            r
-        } else {
-            let immature = self.immature.take();
-            if let Some(cont) = immature {
-                *self = cont().into_iter();
-                self.next()
-            } else {
-                None
             }
         }
     }
@@ -350,44 +313,60 @@ impl<T: Fn(Var, Var, Var) -> Goal> Binding<3> for T {
 pub struct Query<const N: usize> {
     pub goal: Goal,
     pub stream: Stream,
+    pub iter: std::vec::IntoIter<State>,
+}
+
+impl<const N: usize> Iterator for Query<N> {
+    type Item = State;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let r = self.iter.next();
+            if r.is_some() {
+                return r;
+            } else if !self.stream.mature.is_empty() {
+                let mature = std::mem::take(&mut self.stream.mature);
+                self.iter = mature.into_iter();
+            } else if !self.stream.immature.is_empty() {
+                self.stream.pull();
+            } else {
+                return None;
+            }
+        }
+    }
+}
+
+impl<const N: usize> Query<N> {
+    fn resolve(&mut self) -> impl Iterator<Item = Vec<Term>> + '_ {
+        self.map(|s| {
+            (0..N)
+                .map(|v| {
+                    s.resolve(Var {
+                        id: v.try_into().unwrap(),
+                    })
+                })
+                .collect::<Vec<Term>>()
+        })
+    }
 }
 
 pub fn query<const N: usize>(f: impl Binding<N>) -> Query<N> {
     let mut state = State::default();
     let goal = f.bind(&mut state);
     let stream = goal.call(&state);
-    Query { goal, stream }
+    Query {
+        goal,
+        stream,
+        iter: Vec::new().into_iter(),
+    }
 }
 
 pub fn run_all<const N: usize>(f: impl Binding<N>) -> Vec<Vec<Term>> {
-    let q = query(f);
-    q.stream
-        .into_iter()
-        .map(|s| {
-            (0..N)
-                .map(|v| {
-                    s.resolve(Var {
-                        id: v.try_into().unwrap(),
-                    })
-                })
-                .collect::<Vec<Term>>()
-        })
-        .collect()
+    let mut q = query(f);
+    q.resolve().collect()
 }
 
 pub fn run<const N: usize>(n: usize, f: impl Binding<N>) -> Vec<Vec<Term>> {
-    let q = query(f);
-    q.stream
-        .into_iter()
-        .map(|s| {
-            (0..N)
-                .map(|v| {
-                    s.resolve(Var {
-                        id: v.try_into().unwrap(),
-                    })
-                })
-                .collect::<Vec<Term>>()
-        })
-        .take(n)
-        .collect()
+    let mut q = query(f);
+    q.resolve().take(n).collect()
 }

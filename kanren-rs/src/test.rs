@@ -258,13 +258,9 @@ mod tests {
             ]))))
         );
 
-        println!(
-            "set_eq: {}",
-            AsScheme(run(100, |q| fresh(move |x| all([
-                eq(x, cons(1, cons(2, cons(3, NULL)))),
-                set_eq(q, x),
-            ]))))
-        );
+        let mut q = query(|q| fresh(move |x| all([eq(x, cons(1, cons(2, cons(3, NULL)))), set_eq(q, x)])));
+        println!("set_eq: {}", AsScheme(q.resolve().take(100).collect()));
+        println!("{}", GoalTree(&q.goal));
 
         println!(
             "set_insert: {}",
