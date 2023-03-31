@@ -1,7 +1,13 @@
 mod display;
 mod test;
 
-use std::{cell::RefCell, collections::{HashMap, HashSet}, fmt::Debug, rc::Rc};
+use std::{
+    cell::RefCell,
+    cmp::{max, min},
+    collections::{HashMap, HashSet},
+    fmt::Debug,
+    rc::Rc,
+};
 
 // TODO:
 // - impl Goal + 'recursive' types
@@ -11,7 +17,7 @@ use std::{cell::RefCell, collections::{HashMap, HashSet}, fmt::Debug, rc::Rc};
 // - Rc state
 // - Stacked map in Unify
 
-#[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 pub struct Var(u32);
 
 impl Var {
@@ -71,12 +77,6 @@ fn deep_resolve(term: &Term, map: &Mapping) -> Term {
     }
 }
 
-fn extend(key: &Var, value: &Term, map: &Mapping) -> Mapping {
-    let mut m = map.clone();
-    m.insert(*key, value.clone());
-    m
-}
-
 #[derive(Debug)]
 struct Unify {
     map: Mapping,
@@ -91,6 +91,11 @@ impl Unify {
         }
     }
 
+    fn extend(&mut self, var: Var, term: Term) {
+        self.new.push((var, term.clone()));
+        self.map.insert(var, term);
+    }
+
     fn unify(&mut self, a: &Term, b: &Term) -> Option<()> {
         use Term::*;
 
@@ -100,9 +105,14 @@ impl Unify {
             (Var(a), Var(b)) if a == b => Some(()),
             (Value(a), Value(b)) if a == b => Some(()),
             (Null, Null) => Some(()),
-            (Var(v), t) | (t, Var(v)) => {
-                self.new.push((v, t.clone()));
-                self.map.insert(v, t);
+            (Var(a), Var(b)) if a != b => {
+                let var = max(a, b);
+                let term = Term::Var(min(a, b));
+                self.extend(var, term);
+                Some(())
+            }
+            (Var(var), term) | (term, Var(var)) => {
+                self.extend(var, term);
                 Some(())
             }
             (Cons(a_head, a_tail), Cons(b_head, b_tail)) => {
@@ -112,11 +122,6 @@ impl Unify {
             _ => None,
         }
     }
-}
-
-fn unify(a: &Term, b: &Term, map: &Mapping) -> Option<Mapping> {
-    let mut u = Unify::new(map.clone());
-    u.unify(a, b).map(|_| u.map)
 }
 
 type Constraint = Vec<(Var, Term)>;
@@ -423,17 +428,15 @@ impl<const N: usize> Iterator for Query<N> {
 pub struct QueryIter<'a, const N: usize>(&'a mut Query<N>);
 
 impl<'a, const N: usize> Iterator for QueryIter<'a, N> {
-    type Item = State;
+    type Item = StateN<N>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.0.next()
+        self.0.next().map(|state| StateN { state })
     }
 }
 
 pub fn reify<const N: usize>(state: &State) -> [Term; N] {
-    std::array::from_fn(|v| {
-        state.resolve(Var::from_usize(v))
-    })
+    std::array::from_fn(|v| state.resolve(Var::from_usize(v)))
 }
 
 pub fn purify<const N: usize>(state: &State) -> Constraints {
@@ -442,7 +445,7 @@ pub fn purify<const N: usize>(state: &State) -> Constraints {
             Term::Cons(a, b) => {
                 add_vars_to_set(a, set);
                 add_vars_to_set(b, set);
-            },
+            }
             Term::Var(v) => _ = set.insert(*v),
             _ => (),
         }
@@ -456,9 +459,7 @@ pub fn purify<const N: usize>(state: &State) -> Constraints {
 
     fn only_unreachable(term: &Term, set: &HashSet<Var>) -> bool {
         match term {
-            Term::Cons(a, b) => {
-                only_unreachable(a, set) && only_unreachable(b, set)
-            },
+            Term::Cons(a, b) => only_unreachable(a, set) && only_unreachable(b, set),
             Term::Var(v) => !set.contains(v),
             _ => false,
         }
@@ -467,9 +468,12 @@ pub fn purify<const N: usize>(state: &State) -> Constraints {
     state
         .constraints
         .iter()
-        .filter_map(|constraint|{
-            let minimal = constraint.iter()
-                .filter(|(var, term)| reachable_vars.contains(var) && !only_unreachable(term, &reachable_vars) )
+        .filter_map(|constraint| {
+            let minimal = constraint
+                .iter()
+                .filter(|(var, term)| {
+                    reachable_vars.contains(var) && !only_unreachable(term, &reachable_vars)
+                })
                 .cloned()
                 .collect::<Vec<(Var, Term)>>();
 
@@ -478,7 +482,6 @@ pub fn purify<const N: usize>(state: &State) -> Constraints {
             } else {
                 None
             }
-
         })
         .collect::<Constraints>()
 }
@@ -486,10 +489,6 @@ pub fn purify<const N: usize>(state: &State) -> Constraints {
 impl<const N: usize> Query<N> {
     fn iter(&mut self) -> QueryIter<N> {
         QueryIter(self)
-    }
-
-    fn resolve(&mut self) -> impl Iterator<Item = [Term; N]> + '_ {
-        self.map(|s| reify(&s))
     }
 }
 
@@ -512,10 +511,10 @@ pub struct StateN<const N: usize> {
 
 pub fn run_all<const N: usize>(f: impl Binding<N>) -> Vec<StateN<N>> {
     let mut q = query(f);
-    q.iter().map(|state| StateN { state }).collect()
+    q.iter().collect()
 }
 
 pub fn run<const N: usize>(n: usize, f: impl Binding<N>) -> Vec<StateN<N>> {
     let mut q = query(f);
-    q.iter().take(n).map(|state| StateN { state }).collect()
+    q.iter().take(n).collect()
 }

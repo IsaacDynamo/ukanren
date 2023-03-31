@@ -8,12 +8,20 @@ mod tests {
         use Term::Value;
         let e = Mapping::default();
 
+        fn unify(a: &Term, b: &Term, map: &Mapping) -> Option<Mapping> {
+            let mut u = Unify::new(map.clone());
+            u.unify(a, b).map(|_| u.map)
+        }
+
         assert_eq!(format!("{:?}", unify(&Value(1), &Value(1), &e)), "Some({})");
         assert_eq!(format!("{:?}", unify(&Value(1), &Value(2), &e)), "None");
-        assert_eq!(format!("{:?}", unify(&Var(1).into(), &Var(1).into(), &e)), "Some({})");
+        assert_eq!(
+            format!("{:?}", unify(&Var(1).into(), &Var(1).into(), &e)),
+            "Some({})"
+        );
         assert_eq!(
             format!("{:?}", unify(&Var(1).into(), &Var(2).into(), &e)),
-            "Some({Var(1): Var(Var(2))})"
+            "Some({Var(2): Var(Var(1))})"
         );
         assert_eq!(format!("{:?}", unify(&NULL, &NULL, &e)), "Some({})");
         assert_eq!(
@@ -31,7 +39,7 @@ mod tests {
         );
         assert_eq!(
             format!("{:?}", unify(&cons(1, Var(1)), &cons(1, Var(2)), &e)),
-            "Some({Var(1): Var(Var(2))})"
+            "Some({Var(2): Var(Var(1))})"
         );
     }
 
@@ -342,6 +350,55 @@ mod tests {
         );
 
         assert_eq!(
+            AsScheme(run_all(fresh(move |x, y| all([
+                eq(x, cons(1, cons(2, NULL))),
+                eq(y, cons(1, cons(2, cons(3, NULL)))),
+                subset(x, y),
+            ]))))
+            .to_string(),
+            "(())"
+        );
+
+        assert_eq!(
+            AsScheme(run_all(fresh(move |x, y| all([
+                eq(x, cons(1, cons(2, cons(3, NULL)))),
+                eq(y, cons(1, cons(2, NULL))),
+                subset(x, y),
+            ]))))
+            .to_string(),
+            "()"
+        );
+
+        assert_eq!(
+            AsScheme(run_all(fresh(move |x, y| all([
+                eq(x, cons(1, cons(2, NULL))),
+                eq(y, cons(1, cons(2, cons(3, NULL)))),
+                superset(x, y),
+            ]))))
+            .to_string(),
+            "()"
+        );
+
+        assert_eq!(
+            AsScheme(run_all(fresh(move |x, y| all([
+                eq(x, cons(1, cons(2, cons(3, NULL)))),
+                eq(y, cons(1, cons(2, NULL))),
+                superset(x, y),
+            ]))))
+            .to_string(),
+            "(())"
+        );
+
+        assert_eq!(
+            AsScheme(run_all(fresh(move |x| all([
+                eq(x, cons(1, cons(2, cons(1, NULL)))),
+                set_minimal(x),
+            ]))))
+            .to_string(),
+            "()"
+        );
+
+        assert_eq!(
             AsScheme(run_all(fresh(move |x| all([
                 eq(x, cons(1, cons(2, cons(3, NULL)))),
                 set_minimal(x),
@@ -431,11 +488,7 @@ mod tests {
             fresh(move |x| all([eq(x, cons(1, cons(2, NULL))), set_eq(q, x), set_minimal(q)]))
         });
 
-        let first = q
-            .iter()
-            .take(2)
-            .map(|s| StateN::<1> { state: s })
-            .collect::<Vec<_>>();
+        let first = q.iter().take(2).collect::<Vec<_>>();
         assert_eq!(AsScheme(first).to_string(), "(((1 2)) ((2 1)))");
 
         // for _ in 0..10_000 {
@@ -444,11 +497,7 @@ mod tests {
         // println!("{}", GoalTree(&q.goal));
 
         // Doesn't terminate
-        let remainder = q
-            .iter()
-            .take(2)
-            .map(|s| StateN::<1> { state: s })
-            .collect::<Vec<_>>();
+        let remainder = q.iter().take(2).collect::<Vec<_>>();
         assert_eq!(AsScheme(remainder).to_string(), "()");
     }
 
@@ -474,7 +523,7 @@ mod tests {
         );
         assert_eq!(
             AsScheme(run_all(|x, y| neq(x, y))).to_string(),
-            "((_0 _1) : (((_0 . _1))))"
+            "((_0 _1) : (((_1 . _0))))"
         );
         assert_eq!(
             AsScheme(run_all(|q| fresh(move |x| all([
@@ -496,11 +545,11 @@ mod tests {
         );
         assert_eq!(
             AsScheme(run_all(|x, y| eq(cons(5, x), cons(5, y)))).to_string(),
-            "((_1 _1))" // or "((_0 _0))"
+            "((_0 _0))"
         );
         assert_eq!(
             AsScheme(run_all(|x, y| neq(cons(5, x), cons(5, y)))).to_string(),
-            "((_0 _1) : (((_0 . _1))))"
+            "((_0 _1) : (((_1 . _0))))"
         );
 
         assert_eq!(
@@ -522,7 +571,7 @@ mod tests {
 
         assert_eq!(
             AsScheme(run_all(|x, y| all([neq(x, y), neq(x, 6)]))).to_string(),
-            "((_0 _1) : (((_0 . _1)) ((_0 . 6))))" // or  "((_0 _1) : (((_0 . 6))) ((_0 . _1)))"
+            "((_0 _1) : (((_1 . _0)) ((_0 . 6))))"
         );
         assert_eq!(
             AsScheme(run_all(|p, x, y| all([
@@ -547,12 +596,37 @@ mod tests {
             "((_0))"
         );
         assert_eq!(
+            AsScheme(run_all(|_| fresh(move |x, y| neq(x, y)))).to_string(),
+            "((_0))"
+        );
+        assert_eq!(
+            AsScheme(run_all(|q| fresh(move |x| neq(q, x)))).to_string(),
+            "((_0))"
+        );
+        assert_eq!(
             AsScheme(run_all(|q| fresh(move |x, y, z| all([
                 neq(cons(y, z), x),
                 eq(q, cons(x, cons(y, cons(z, NULL))))
             ]))))
             .to_string(),
             "(((_1 _2 _3)) : (((_1 . (_2 . _3)))))"
+        );
+        assert_eq!(
+            AsScheme(run_all(|a, b| fresh(move |x, y| all([
+                eq(a, x),
+                eq(x, y),
+                neq(y, b)
+            ]))))
+            .to_string(),
+            "((_0 _1) : (((_1 . _0))))"
+        );
+        assert_eq!(
+            AsScheme(run_all(|x, y| neq(x, y))).to_string(),
+            "((_0 _1) : (((_1 . _0))))"
+        );
+        assert_eq!(
+            AsScheme(run_all(|x, y| neq(y, x))).to_string(),
+            "((_0 _1) : (((_1 . _0))))"
         );
     }
 }

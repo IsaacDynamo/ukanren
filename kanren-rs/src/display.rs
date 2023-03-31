@@ -37,7 +37,7 @@ impl<const N: usize> DisplayScheme for StateN<N> {
 
 impl DisplayScheme for (Var, Term) {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_fmt(format_args!("(_{} . {})", self.0.0, Scheme(&self.1)))
+        f.write_fmt(format_args!("(_{} . {})", self.0 .0, Scheme(&self.1)))
     }
 }
 
