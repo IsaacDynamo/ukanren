@@ -1,51 +1,97 @@
-use crate::{Goal, Term};
+use crate::{purify, reify};
+use crate::{Goal, StateN, Term};
 
-pub struct AsScheme<const N: usize>(pub Vec<[Term; N]>);
+use std::fmt::Display;
 
-impl<const N: usize> std::fmt::Display for AsScheme<N> {
+pub struct AsScheme<T: DisplayScheme>(pub T);
+
+impl<T: DisplayScheme> Display for AsScheme<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        fn term(t: &Term, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            match t {
-                Term::Var(x) => f.write_fmt(format_args!("_{x}")),
-                Term::Value(x) => f.write_fmt(format_args!("{x}")),
-                Term::Null => f.write_str("()"),
-                Term::Cons(head, tail) => {
-                    f.write_str("(")?;
-                    term(head.as_ref(), f)?;
-                    inner(tail.as_ref(), f)?;
-                    f.write_str(")")
-                }
-            }
-        }
+        self.0.fmt(f)
+    }
+}
 
-        fn inner(t: &Term, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            match t {
+pub struct Scheme<'a, T: DisplayScheme>(&'a T);
+
+impl<'a, T: DisplayScheme> Display for Scheme<'a, T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+pub trait DisplayScheme {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result;
+}
+
+impl<const N: usize> DisplayScheme for StateN<N> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        AsScheme(reify::<N>(&self.state)).fmt(f)?;
+        let constraints = purify::<N>(&self.state);
+        if !constraints.is_empty() {
+            f.write_str(" : ")?;
+            Scheme(&constraints).fmt(f)?;
+        }
+        Ok(())
+    }
+}
+
+impl DisplayScheme for (u32, Term) {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("(_{} . {})", self.0, Scheme(&self.1)))
+    }
+}
+
+impl DisplayScheme for Term {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        fn inner(term: &Term, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match term {
                 Term::Null => Ok(()),
                 Term::Cons(head, tail) => {
                     f.write_str(" ")?;
-                    term(head.as_ref(), f)?;
+                    head.as_ref().fmt(f)?;
                     inner(tail.as_ref(), f)
                 }
                 _ => {
                     f.write_str(" . ")?;
-                    term(t, f)
+                    term.fmt(f)
                 }
             }
         }
 
+        match self {
+            Term::Var(x) => f.write_fmt(format_args!("_{x}")),
+            Term::Value(x) => f.write_fmt(format_args!("{x}")),
+            Term::Null => f.write_str("()"),
+            Term::Cons(head, tail) => {
+                f.write_str("(")?;
+                head.as_ref().fmt(f)?;
+                inner(tail.as_ref(), f)?;
+                f.write_str(")")
+            }
+        }
+    }
+}
+
+impl<T: DisplayScheme> DisplayScheme for Vec<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.as_slice().fmt(f)
+    }
+}
+
+impl<T: DisplayScheme, const N: usize> DisplayScheme for [T; N] {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.as_slice().fmt(f)
+    }
+}
+
+impl<T: DisplayScheme> DisplayScheme for &[T] {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("(")?;
-        for (i, vars) in self.0.iter().enumerate() {
+        for (i, x) in self.iter().enumerate() {
             if i != 0 {
                 f.write_str(" ")?;
             }
-            f.write_str("(")?;
-            for (j, var) in vars.iter().enumerate() {
-                if j != 0 {
-                    f.write_str(" ")?;
-                }
-                term(var, f)?;
-            }
-            f.write_str(")")?;
+            x.fmt(f)?;
         }
         f.write_str(")")
     }
@@ -59,6 +105,7 @@ impl<'a> std::fmt::Display for GoalTree<'a> {
             let spacer = " ".repeat(depth);
             match goal {
                 Goal::Eq(a, b) => f.write_fmt(format_args!("{}{:?} == {:?}\n", spacer, a, b)),
+                Goal::Neq(a, b) => f.write_fmt(format_args!("{}{:?} != {:?}\n", spacer, a, b)),
                 Goal::Both(a, b) => {
                     f.write_str(&spacer)?;
                     f.write_str("Both\n")?;

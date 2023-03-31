@@ -72,29 +72,55 @@ fn extend(key: &u32, value: &Term, map: &Mapping) -> Mapping {
     m
 }
 
-fn unify(a: &Term, b: &Term, map: &Mapping) -> Option<Mapping> {
-    use Term::*;
+#[derive(Debug)]
+struct Unify {
+    map: Mapping,
+    new: Vec<(u32, Term)>,
+}
 
-    let a = resolve(a, map);
-    let b = resolve(b, map);
-
-    match (a, b) {
-        (Var(a), Var(b)) if *a == *b => Some(map.clone()),
-        (Value(a), Value(b)) if *a == *b => Some(map.clone()),
-        (Null, Null) => Some(map.clone()),
-        (Var(a), b) => Some(extend(a, b, map)),
-        (a, Var(b)) => Some(extend(b, a, map)),
-        (Cons(a_head, a_tail), Cons(b_head, b_tail)) => {
-            let map = unify(a_head, b_head, map)?;
-            unify(a_tail, b_tail, &map)
+impl Unify {
+    fn new(map: Mapping) -> Self {
+        Self {
+            map,
+            new: Vec::new(),
         }
-        _ => None,
+    }
+
+    fn unify(&mut self, a: &Term, b: &Term) -> Option<()> {
+        use Term::*;
+
+        let a = resolve(a, &self.map).clone();
+        let b = resolve(b, &self.map).clone();
+        match (a, b) {
+            (Var(a), Var(b)) if a == b => Some(()),
+            (Value(a), Value(b)) if a == b => Some(()),
+            (Null, Null) => Some(()),
+            (Var(v), t) | (t, Var(v)) => {
+                self.new.push((v, t.clone()));
+                self.map.insert(v, t);
+                Some(())
+            }
+            (Cons(a_head, a_tail), Cons(b_head, b_tail)) => {
+                self.unify(&a_head, &b_head)?;
+                self.unify(&a_tail, &b_tail)
+            }
+            _ => None,
+        }
     }
 }
+
+fn unify(a: &Term, b: &Term, map: &Mapping) -> Option<Mapping> {
+    let mut u = Unify::new(map.clone());
+    u.unify(a, b).map(|_| u.map)
+}
+
+type Constraint = Vec<(u32, Term)>;
+type Constraints = Vec<Constraint>;
 
 #[derive(Default, Debug, Clone)]
 pub struct State {
     map: Mapping,
+    constraints: Constraints,
     id: u32,
 }
 
@@ -115,6 +141,7 @@ impl State {
 #[derive(Clone)]
 pub enum Goal {
     Eq(Term, Term),
+    Neq(Term, Term),
     Both(Rc<Goal>, Rc<Goal>),
     Either(Rc<Goal>, Rc<Goal>),
     Fresh(Rc<dyn Fn(&mut State) -> Goal>, RefCell<Option<Box<Goal>>>),
@@ -123,6 +150,10 @@ pub enum Goal {
 
 pub fn eq(a: impl Into<Term>, b: impl Into<Term>) -> Goal {
     Goal::Eq(a.into(), b.into())
+}
+
+pub fn neq(a: impl Into<Term>, b: impl Into<Term>) -> Goal {
+    Goal::Neq(a.into(), b.into())
 }
 
 pub fn both(a: Goal, b: Goal) -> Goal {
@@ -180,6 +211,13 @@ pub struct Stream {
 }
 
 impl Stream {
+    pub fn new(state: State) -> Self {
+        Stream {
+            mature: vec![state],
+            immature: Vec::new(),
+        }
+    }
+
     pub fn append(&mut self, s: Stream) {
         fn combine<T>(a: &mut Vec<T>, mut b: Vec<T>) {
             if a.is_empty() {
@@ -217,22 +255,64 @@ fn mappend(goal: &Goal, stream: Stream) -> Stream {
     result
 }
 
+fn verify(map: &Mapping, constraints: &Constraints, new: &mut Constraints) -> bool {
+    for elements in constraints {
+        let mut u = Unify::new(map.clone());
+        let x = elements.iter().fold(Some(()), |r, element| {
+            r.and_then(|_| u.unify(&Term::Var(element.0), &element.1))
+        });
+
+        if x.is_some() {
+            if u.new.is_empty() {
+                // Unification without addition, so constraint is violated
+                return false;
+            } else {
+                new.push(u.new);
+            }
+        }
+    }
+
+    true
+}
+
 impl Goal {
     fn call(&self, state: &State) -> Stream {
         use Goal::*;
 
         match self {
             Eq(a, b) => {
-                if let Some(mapping) = unify(a, b, &state.map) {
-                    Stream {
-                        mature: vec![State {
-                            map: mapping,
-                            id: state.id,
-                        }],
-                        immature: Vec::new(),
+                let mut u = Unify::new(state.map.clone());
+                match u.unify(a, b) {
+                    Some(_) if u.new.is_empty() => Stream::new(state.clone()),
+                    Some(_) => {
+                        let mut constraints = Vec::new();
+                        if verify(&u.map, &state.constraints, &mut constraints) {
+                            Stream::new(State {
+                                map: u.map,
+                                id: state.id,
+                                constraints,
+                            })
+                        } else {
+                            Stream::default()
+                        }
                     }
-                } else {
-                    Stream::default()
+                    None => Stream::default(),
+                }
+            }
+            Neq(a, b) => {
+                let mut u = Unify::new(state.map.clone());
+                match u.unify(a, b) {
+                    Some(_) if u.new.is_empty() => Stream::default(),
+                    Some(_) => {
+                        let mut constraints = state.constraints.clone();
+                        constraints.push(u.new);
+                        Stream::new(State {
+                            map: state.map.clone(),
+                            id: state.id,
+                            constraints,
+                        })
+                    }
+                    None => Stream::new(state.clone()),
                 }
             }
             Either(a, b) => append(a.call(state), b.call(state)),
@@ -302,40 +382,74 @@ pub struct Query<const N: usize> {
     pub immature_iter: std::vec::IntoIter<Box<dyn FnOnce() -> Stream>>,
 }
 
+impl<const N: usize> Query<N> {
+    fn pull(&mut self) -> Option<Option<State>> {
+        let state = self.mature_iter.next();
+        if state.is_some() {
+            return Some(state);
+        } else if !self.stream.mature.is_empty() {
+            let mature = std::mem::take(&mut self.stream.mature);
+            self.mature_iter = mature.into_iter();
+        } else if let Some(cont) = self.immature_iter.next() {
+            self.stream.append(cont());
+        } else if !self.stream.immature.is_empty() {
+            let immature = std::mem::take(&mut self.stream.immature);
+            self.immature_iter = immature.into_iter();
+        } else {
+            return None;
+        }
+        Some(None)
+    }
+}
+
 impl<const N: usize> Iterator for Query<N> {
     type Item = State;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            let state = self.mature_iter.next();
-            if state.is_some() {
-                return state;
-            } else if !self.stream.mature.is_empty() {
-                let mature = std::mem::take(&mut self.stream.mature);
-                self.mature_iter = mature.into_iter();
-            } else {
-                if let Some(cont) = self.immature_iter.next() {
-                    self.stream.append(cont());
-                } else if !self.stream.immature.is_empty() {
-                    let immature = std::mem::take(&mut self.stream.immature);
-                    self.immature_iter = immature.into_iter();
-                } else {
-                    return None;
-                }
+            let n = self.pull()?;
+            if n.is_some() {
+                return n;
             }
         }
     }
 }
 
-impl<const N: usize> Query<N> {
-    fn resolve(&mut self) -> impl Iterator<Item = [Term; N]> + '_ {
-        self.map(|s| {
-            std::array::from_fn(|v| {
-                s.resolve(Var {
-                    id: v.try_into().unwrap(),
-                })
-            })
+pub struct QueryIter<'a, const N: usize>(&'a mut Query<N>);
+
+impl<'a, const N: usize> Iterator for QueryIter<'a, N> {
+    type Item = State;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next()
+    }
+}
+
+pub fn reify<const N: usize>(state: &State) -> [Term; N] {
+    std::array::from_fn(|v| {
+        state.resolve(Var {
+            id: v.try_into().unwrap(),
         })
+    })
+}
+
+pub fn purify<const N: usize>(state: &State) -> Constraints {
+    // TODO minimize constraint
+    state
+        .constraints
+        .iter()
+        .filter(|constraint| constraint.iter().all(|(i, _)| *i < N as u32))
+        .cloned()
+        .collect::<Constraints>()
+}
+
+impl<const N: usize> Query<N> {
+    fn iter(&mut self) -> QueryIter<N> {
+        QueryIter(self)
+    }
+
+    fn resolve(&mut self) -> impl Iterator<Item = [Term; N]> + '_ {
+        self.map(|s| reify(&s))
     }
 }
 
@@ -351,12 +465,17 @@ pub fn query<const N: usize>(f: impl Binding<N>) -> Query<N> {
     }
 }
 
-pub fn run_all<const N: usize>(f: impl Binding<N>) -> Vec<[Term; N]> {
-    let mut q = query(f);
-    q.resolve().collect()
+#[derive(Debug)]
+pub struct StateN<const N: usize> {
+    state: State,
 }
 
-pub fn run<const N: usize>(n: usize, f: impl Binding<N>) -> Vec<[Term; N]> {
+pub fn run_all<const N: usize>(f: impl Binding<N>) -> Vec<StateN<N>> {
     let mut q = query(f);
-    q.resolve().take(n).collect()
+    q.iter().map(|state| StateN { state }).collect()
+}
+
+pub fn run<const N: usize>(n: usize, f: impl Binding<N>) -> Vec<StateN<N>> {
+    let mut q = query(f);
+    q.iter().take(n).map(|state| StateN { state }).collect()
 }
