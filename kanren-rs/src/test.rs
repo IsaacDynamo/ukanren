@@ -5,17 +5,17 @@ mod tests {
 
     #[test]
     fn test_unify() {
-        use Term::*;
+        use Term::Value;
         let e = Mapping::default();
 
         assert_eq!(format!("{:?}", unify(&Value(1), &Value(1), &e)), "Some({})");
         assert_eq!(format!("{:?}", unify(&Value(1), &Value(2), &e)), "None");
-        assert_eq!(format!("{:?}", unify(&Var(1), &Var(1), &e)), "Some({})");
+        assert_eq!(format!("{:?}", unify(&Var(1).into(), &Var(1).into(), &e)), "Some({})");
         assert_eq!(
-            format!("{:?}", unify(&Var(1), &Var(2), &e)),
-            "Some({1: Var(2)})"
+            format!("{:?}", unify(&Var(1).into(), &Var(2).into(), &e)),
+            "Some({Var(1): Var(Var(2))})"
         );
-        assert_eq!(format!("{:?}", unify(&Null, &Null, &e)), "Some({})");
+        assert_eq!(format!("{:?}", unify(&NULL, &NULL, &e)), "Some({})");
         assert_eq!(
             format!("{:?}", unify(&cons(1, 2), &cons(1, 2), &e)),
             "Some({})"
@@ -31,7 +31,7 @@ mod tests {
         );
         assert_eq!(
             format!("{:?}", unify(&cons(1, Var(1)), &cons(1, Var(2)), &e)),
-            "Some({1: Var(2)})"
+            "Some({Var(1): Var(Var(2))})"
         );
     }
 
@@ -552,7 +552,7 @@ mod tests {
                 eq(q, cons(x, cons(y, cons(z, NULL))))
             ]))))
             .to_string(),
-            "(((_1 _2 _3)) : (_1 _2 . _3) )"
+            "(((_1 _2 _3)) : (((_1 . (_2 . _3)))))"
         );
     }
 }

@@ -1,5 +1,5 @@
 use crate::{purify, reify};
-use crate::{Goal, StateN, Term};
+use crate::{Goal, StateN, Term, Var};
 
 use std::fmt::Display;
 
@@ -35,9 +35,9 @@ impl<const N: usize> DisplayScheme for StateN<N> {
     }
 }
 
-impl DisplayScheme for (u32, Term) {
+impl DisplayScheme for (Var, Term) {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_fmt(format_args!("(_{} . {})", self.0, Scheme(&self.1)))
+        f.write_fmt(format_args!("(_{} . {})", self.0.0, Scheme(&self.1)))
     }
 }
 
@@ -59,7 +59,7 @@ impl DisplayScheme for Term {
         }
 
         match self {
-            Term::Var(x) => f.write_fmt(format_args!("_{x}")),
+            Term::Var(x) => f.write_fmt(format_args!("_{}", x.0)),
             Term::Value(x) => f.write_fmt(format_args!("{x}")),
             Term::Null => f.write_str("()"),
             Term::Cons(head, tail) => {

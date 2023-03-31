@@ -1,24 +1,29 @@
 mod display;
 mod test;
 
-use std::{cell::RefCell, collections::HashMap, fmt::Debug, rc::Rc};
+use std::{cell::RefCell, collections::{HashMap, HashSet}, fmt::Debug, rc::Rc};
 
 // TODO:
-// - neq()
 // - impl Goal + 'recursive' types
 // - Prefer non-yield goals in eval of Both
 // - Add bool and str
 // - Use term arguments in custom goals
+// - Rc state
+// - Stacked map in Unify
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
-pub struct Var {
-    id: u32,
+pub struct Var(u32);
+
+impl Var {
+    fn from_usize(v: usize) -> Self {
+        Self(v.try_into().expect("Conversion failed"))
+    }
 }
 
 #[derive(Debug, Clone)]
 pub enum Term {
     Value(i32), // Todo make generic
-    Var(u32),
+    Var(Var),
     Cons(Rc<Term>, Rc<Term>),
     Null,
 }
@@ -31,7 +36,7 @@ impl From<i32> for Term {
 
 impl From<Var> for Term {
     fn from(var: Var) -> Self {
-        Self::Var(var.id)
+        Self::Var(var)
     }
 }
 
@@ -41,7 +46,7 @@ pub fn cons(a: impl Into<Term>, b: impl Into<Term>) -> Term {
 
 pub const NULL: Term = Term::Null;
 
-type Mapping = HashMap<u32, Term>;
+type Mapping = HashMap<Var, Term>;
 
 fn resolve<'a>(term: &'a Term, map: &'a Mapping) -> &'a Term {
     use Term::*;
@@ -66,7 +71,7 @@ fn deep_resolve(term: &Term, map: &Mapping) -> Term {
     }
 }
 
-fn extend(key: &u32, value: &Term, map: &Mapping) -> Mapping {
+fn extend(key: &Var, value: &Term, map: &Mapping) -> Mapping {
     let mut m = map.clone();
     m.insert(*key, value.clone());
     m
@@ -75,7 +80,7 @@ fn extend(key: &u32, value: &Term, map: &Mapping) -> Mapping {
 #[derive(Debug)]
 struct Unify {
     map: Mapping,
-    new: Vec<(u32, Term)>,
+    new: Vec<(Var, Term)>,
 }
 
 impl Unify {
@@ -114,7 +119,7 @@ fn unify(a: &Term, b: &Term, map: &Mapping) -> Option<Mapping> {
     u.unify(a, b).map(|_| u.map)
 }
 
-type Constraint = Vec<(u32, Term)>;
+type Constraint = Vec<(Var, Term)>;
 type Constraints = Vec<Constraint>;
 
 #[derive(Default, Debug, Clone)]
@@ -126,7 +131,7 @@ pub struct State {
 
 impl State {
     fn resolve(&self, v: Var) -> Term {
-        let term = Term::Var(v.id);
+        let term = Term::Var(v);
         deep_resolve(&term, &self.map)
     }
 
@@ -134,7 +139,7 @@ impl State {
         let id = self.id;
         assert_ne!(id, u32::MAX, "Overflow");
         self.id += 1;
-        Var { id }
+        Var(id)
     }
 }
 
@@ -427,19 +432,54 @@ impl<'a, const N: usize> Iterator for QueryIter<'a, N> {
 
 pub fn reify<const N: usize>(state: &State) -> [Term; N] {
     std::array::from_fn(|v| {
-        state.resolve(Var {
-            id: v.try_into().unwrap(),
-        })
+        state.resolve(Var::from_usize(v))
     })
 }
 
 pub fn purify<const N: usize>(state: &State) -> Constraints {
-    // TODO minimize constraint
+    fn add_vars_to_set(term: &Term, set: &mut HashSet<Var>) {
+        match term {
+            Term::Cons(a, b) => {
+                add_vars_to_set(a, set);
+                add_vars_to_set(b, set);
+            },
+            Term::Var(v) => _ = set.insert(*v),
+            _ => (),
+        }
+    }
+
+    let mut reachable_vars = HashSet::new();
+    for v in 0..N {
+        let t = state.resolve(Var::from_usize(v));
+        add_vars_to_set(&t, &mut reachable_vars);
+    }
+
+    fn only_unreachable(term: &Term, set: &HashSet<Var>) -> bool {
+        match term {
+            Term::Cons(a, b) => {
+                only_unreachable(a, set) && only_unreachable(b, set)
+            },
+            Term::Var(v) => !set.contains(v),
+            _ => false,
+        }
+    }
+
     state
         .constraints
         .iter()
-        .filter(|constraint| constraint.iter().all(|(i, _)| *i < N as u32))
-        .cloned()
+        .filter_map(|constraint|{
+            let minimal = constraint.iter()
+                .filter(|(var, term)| reachable_vars.contains(var) && !only_unreachable(term, &reachable_vars) )
+                .cloned()
+                .collect::<Vec<(Var, Term)>>();
+
+            if !minimal.is_empty() {
+                Some(minimal)
+            } else {
+                None
+            }
+
+        })
         .collect::<Constraints>()
 }
 
