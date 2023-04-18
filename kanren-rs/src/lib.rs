@@ -279,6 +279,9 @@ fn verify(map: &Mapping, constraints: &Constraints, new: &mut Constraints) -> bo
             } else {
                 new.push(u.new);
             }
+        } else {
+            // Unification of constraint failed, so the constraint holds.
+            // The constraint is no longer need
         }
     }
 
