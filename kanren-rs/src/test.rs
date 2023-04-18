@@ -590,11 +590,7 @@ mod tests {
     }
 
     #[test]
-    fn constraint_test_todo() {
-        assert_eq!(
-            AsScheme(run_all(|q| fresh(move |x, y| neq(q, cons(x, y))))).to_string(),
-            "((_0))"
-        );
+    fn constraint_test_todos() {
         assert_eq!(
             AsScheme(run_all(|_| fresh(move |x, y| neq(x, y)))).to_string(),
             "((_0))"
@@ -627,6 +623,175 @@ mod tests {
         assert_eq!(
             AsScheme(run_all(|x, y| neq(y, x))).to_string(),
             "((_0 _1) : (((_1 . _0))))"
+        );
+    }
+
+    #[test]
+    fn sudoku() {
+        fn number(x: Var) -> Goal {
+            any([
+                eq(x, 1),
+                eq(x, 2),
+                eq(x, 3),
+                eq(x, 4),
+                eq(x, 5),
+                eq(x, 6),
+                eq(x, 7),
+                eq(x, 8),
+                eq(x, 9),
+            ])
+        }
+
+        assert_eq!(
+            AsScheme(run_all(|q| number(q))).to_string(),
+            "((1) (2) (3) (4) (5) (6) (7) (8) (9))"
+        );
+    }
+}
+
+#[cfg(test)]
+mod constraints {
+    use crate::display::*;
+    use crate::*;
+
+    #[test]
+    fn case1() {
+        assert_eq!(
+            AsScheme(run_all(|x, y| all([neq(x, 1), neq(y, 2)]))).to_string(),
+            "((_0 _1) : (((_0 . 1)) ((_1 . 2))))"
+        );
+    }
+
+    #[test]
+    fn case2() {
+        assert_eq!(
+            AsScheme(run_all(|x, y| all([neq(cons(x, y), cons(1, 2))]))).to_string(),
+            "((_0 _1) : (((_0 . 1) (_1 . 2))))"
+        );
+    }
+
+    #[test]
+    fn case3() {
+        assert_eq!(
+            AsScheme(run_all(|x, y| all([
+                neq(cons(x, y), cons(1, 2)),
+                fresh(move |t| any([eq(cons(x, y), cons(1, t)), eq(cons(x, y), cons(t, 2))]))
+            ])))
+            .to_string(),
+            "((1 _1) : (((_1 . 2))) (_0 2) : (((_0 . 1))))"
+        );
+    }
+}
+
+#[cfg(test)]
+mod minimal_constraints {
+    use crate::display::*;
+    use crate::*;
+
+    #[test]
+    fn case1a() {
+        assert_eq!(
+            AsScheme(run_all(|q, x| all([
+                neq(q, cons(5, cons(x, x))),
+                eq(q, cons(5, cons(1, 1)))
+            ])))
+            .to_string(),
+            "(((5 1 . 1) _1) : (((_1 . 1))))"
+        );
+    }
+
+    #[test]
+    fn case1b() {
+        assert_eq!(
+            AsScheme(run_all(|q, x| all([
+                neq(q, cons(5, cons(x, x))),
+                eq(x, 1),
+                eq(q, cons(5, cons(1, 1)))
+            ])))
+            .to_string(),
+            "()"
+        );
+    }
+
+    #[test]
+    fn case1c() {
+        assert_eq!(
+            AsScheme(run_all(|q, x| all([
+                neq(q, cons(5, cons(x, x))),
+                neq(x, 1),
+                eq(q, cons(5, cons(1, 1)))
+            ])))
+            .to_string(),
+            "(((5 1 . 1) _1) : (((_1 . 1))))"
+        );
+    }
+
+    #[test]
+    fn case2() {
+        assert_eq!(
+            AsScheme(run_all(|q| fresh(move |x| cond([
+                vec![neq(q, cons(5, cons(x, x))), neq(x, 1)],
+                vec![neq(q, 5), neq(x, 1)]
+            ]))))
+            .to_string(),
+            "((_0) : (((_0 . (5 _1 . _1)) (_1 . 1))) (_0) : (((_0 . 5))))"
+        );
+    }
+
+    #[test]
+    fn case3() {
+        assert_eq!(
+            AsScheme(run_all(|x, y| all([
+                neq(cons(x, y), cons(1, 2)),
+                neq(x, 1),
+                neq(y, 2)
+            ])))
+            .to_string(),
+            "((_0 _1) : (((_0 . 1)) ((_1 . 2))))"
+        );
+    }
+
+    #[test]
+    fn case4() {
+        assert_eq!(
+            AsScheme(run_all(|x, y| all([
+                neq(cons(x, y), cons(1, 2)),
+                neq(x, 1)
+            ])))
+            .to_string(),
+            "((_0 _1) : (((_0 . 1)) ((_1 . 2))))"
+        );
+    }
+
+    #[test]
+    fn case5a() {
+        assert_eq!(
+            AsScheme(run_all(|q| fresh(move |x| all([neq(
+                q,
+                cons(5, cons(x, x))
+            )]))))
+            .to_string(),
+            "((_0))"
+        );
+    }
+
+    #[test]
+    fn case5b() {
+        assert_eq!(
+            AsScheme(run_all(|q| fresh(move |x| all([
+                neq(q, cons(5, cons(x, x))),
+                eq(x, 1)
+            ]))))
+            .to_string(),
+            "((_0) : (((_0 . (5 1 . 1)))))"
+        );
+    }
+
+    #[test]
+    fn case6() {
+        assert_eq!(
+            AsScheme(run_all(|q| fresh(move |x, y| neq(q, cons(x, y))))).to_string(),
+            "((_0))"
         );
     }
 }
