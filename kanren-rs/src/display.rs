@@ -26,8 +26,13 @@ pub trait DisplayScheme {
 impl<const N: usize> DisplayScheme for StateN<N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         AsScheme(reify::<N>(&self.state)).fmt(f)?;
-        let constraints = purify::<N>(&self.state);
+        let mut constraints = purify::<N>(&self.state);
         if !constraints.is_empty() {
+            // Sort to make string representation comparable
+            for constraint in constraints.iter_mut() {
+                constraint.sort();
+            }
+            constraints.sort();
             f.write_str(" : ")?;
             Scheme(&constraints).fmt(f)?;
         }

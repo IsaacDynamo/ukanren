@@ -26,7 +26,7 @@ impl Var {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Term {
     Value(i32), // Todo make generic
     Var(Var),
@@ -443,50 +443,85 @@ pub fn reify<const N: usize>(state: &State) -> [Term; N] {
 }
 
 pub fn purify<const N: usize>(state: &State) -> Constraints {
-    fn add_vars_to_set(term: &Term, set: &mut HashSet<Var>) {
-        match term {
-            Term::Cons(a, b) => {
-                add_vars_to_set(a, set);
-                add_vars_to_set(b, set);
-            }
-            Term::Var(v) => _ = set.insert(*v),
-            _ => (),
-        }
-    }
-
+    // Find all reachable variables
     let mut reachable_vars = HashSet::new();
     for v in 0..N {
-        let t = state.resolve(Var::from_usize(v));
-        add_vars_to_set(&t, &mut reachable_vars);
+
+        /// Insert the Vars of a Term into a set
+        fn insert(set: &mut HashSet<Var>, term: &Term) {
+            match term {
+                Term::Cons(a, b) => {
+                    insert(set, a);
+                    insert(set, b);
+                }
+                Term::Var(v) => _ = set.insert(*v),
+                _ => (),
+            }
+        }
+
+        let term = state.resolve(Var::from_usize(v));
+        insert(&mut reachable_vars, &term);
     }
 
-    fn only_unreachable(term: &Term, set: &HashSet<Var>) -> bool {
-        match term {
-            Term::Cons(a, b) => only_unreachable(a, set) && only_unreachable(b, set),
-            Term::Var(v) => !set.contains(v),
-            _ => false,
+    // Initial constraints, only keep constraints with constants or reachable variables
+    let mut constraints = Vec::from_iter(
+        state.constraints
+        .iter()
+        .map(|vec| HashSet::from_iter(
+            vec
+            .iter()
+            .map(|(var, term)| (*var, deep_resolve(term, &state.map)))
+            .filter(|(var, term)| {
+                fn only_reachable(term: &Term, set: &HashSet<Var>) -> bool {
+                    match term {
+                        Term::Cons(a, b) => only_reachable(a, set) && only_reachable(b, set),
+                        Term::Var(v) => set.contains(v),
+                        _ => true,
+                    }
+                }
+
+                reachable_vars.contains(var) && only_reachable(term, &reachable_vars)
+            }))
+        )
+    );
+
+    // Start with empty set
+    let mut minimal_constraints = Vec::<HashSet<(Var, Term)>>::new();
+
+    // Process constraints
+    while let Some(mut new_constraint) = constraints.pop() {
+
+        let C = std::mem::take(&mut minimal_constraints);
+        for constraint in C {
+
+            if new_constraint.is_empty() {
+                minimal_constraints.push(constraint);
+                continue
+            }
+
+            if constraint.is_subset(&new_constraint) {
+                new_constraint = new_constraint.difference(&constraint).cloned().collect();
+                minimal_constraints.push(constraint);
+            } else if constraint.is_superset(&new_constraint) {
+                // drop
+            } else if constraint.is_disjoint(&new_constraint){
+                minimal_constraints.push(constraint)
+            } else {
+                let reduced = constraint.difference(&new_constraint).cloned().collect();
+                constraints.push(reduced);
+            }
+        }
+
+        if !new_constraint.is_empty() {
+            minimal_constraints.push(new_constraint);
         }
     }
 
-    state
-        .constraints
-        .iter()
-        .filter_map(|constraint| {
-            let minimal = constraint
-                .iter()
-                .filter(|(var, term)| {
-                    reachable_vars.contains(var) && !only_unreachable(term, &reachable_vars)
-                })
-                .cloned()
-                .collect::<Vec<(Var, Term)>>();
-
-            if !minimal.is_empty() {
-                Some(minimal)
-            } else {
-                None
-            }
-        })
-        .collect::<Constraints>()
+    // Sort output so units test can use string comparison
+    minimal_constraints
+        .into_iter()
+        .map(|s|Vec::from_iter(s.into_iter()))
+        .collect()
 }
 
 impl<const N: usize> Query<N> {

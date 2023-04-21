@@ -568,11 +568,6 @@ mod tests {
             AsScheme(run_all(|q| all([neq(q, 2), eq(q, 2)]))).to_string(),
             "()"
         );
-
-        assert_eq!(
-            AsScheme(run_all(|x, y| all([neq(x, y), neq(x, 6)]))).to_string(),
-            "((_0 _1) : (((_1 . _0)) ((_0 . 6))))"
-        );
         assert_eq!(
             AsScheme(run_all(|p, x, y| all([
                 neq(cons(5, 6), p),
@@ -586,6 +581,14 @@ mod tests {
         assert_eq!(
             AsScheme(run_all(|x, y| neq(x, cons(5, y)))).to_string(),
             "((_0 _1) : (((_0 . (5 . _1)))))"
+        );
+    }
+
+    #[test]
+    fn neq_case1(){
+        assert_eq!(
+            AsScheme(run_all(|x, y| all([neq(x, y), neq(x, 6)]))).to_string(),
+            "((_0 _1) : (((_0 . 6)) ((_1 . _0))))"
         );
     }
 
@@ -734,7 +737,7 @@ mod minimal_constraints {
                 vec![neq(q, 5), neq(x, 1)]
             ]))))
             .to_string(),
-            "((_0) : (((_0 . (5 _1 . _1)) (_1 . 1))) (_0) : (((_0 . 5))))"
+            "((_0) (_0) : (((_0 . 5))))"
         );
     }
 
