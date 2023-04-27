@@ -585,7 +585,7 @@ mod tests {
     }
 
     #[test]
-    fn neq_case1(){
+    fn neq_case1() {
         assert_eq!(
             AsScheme(run_all(|x, y| all([neq(x, y), neq(x, 6)]))).to_string(),
             "((_0 _1) : (((_0 . 6)) ((_1 . _0))))"
@@ -742,7 +742,7 @@ mod minimal_constraints {
     }
 
     #[test]
-    fn case3() {
+    fn case3a() {
         assert_eq!(
             AsScheme(run_all(|x, y| all([
                 neq(cons(x, y), cons(1, 2)),
@@ -755,14 +755,61 @@ mod minimal_constraints {
     }
 
     #[test]
-    fn case4() {
+    fn case3b() {
         assert_eq!(
             AsScheme(run_all(|x, y| all([
                 neq(cons(x, y), cons(1, 2)),
                 neq(x, 1)
             ])))
             .to_string(),
-            "((_0 _1) : (((_0 . 1)) ((_1 . 2))))"
+            "((_0 _1) : (((_0 . 1))))"
+        );
+    }
+
+    #[test]
+    fn case3c() {
+        assert_eq!(
+            AsScheme(run_all(|x, y| all([neq(cons(x, y), cons(1, 2)),]))).to_string(),
+            "((_0 _1) : (((_0 . 1) (_1 . 2))))"
+        );
+    }
+
+    #[test]
+    fn case4a() {
+        assert_eq!(
+            AsScheme(run_all(|x, y| all([
+                neq(cons(x, y), cons(1, 2)),
+                neq(cons(x, y), cons(1, 3)),
+            ])))
+            .to_string(),
+            "((_0 _1) : (((_0 . 1) (_1 . 2)) ((_0 . 1) (_1 . 3))))"
+        );
+    }
+
+    #[test]
+    fn case4b() {
+        assert_eq!(
+            AsScheme(run_all(|x, y| all([
+                neq(cons(x, y), cons(1, 2)),
+                neq(cons(x, y), cons(1, 3)),
+                neq(x, 1)
+            ])))
+            .to_string(),
+            "((_0 _1) : (((_0 . 1))))"
+        );
+    }
+
+    #[test]
+    fn case4c() {
+        assert_eq!(
+            AsScheme(run_all(|x, y| all([
+                neq(cons(x, y), cons(1, 2)),
+                neq(cons(x, y), cons(1, 3)),
+                neq(y, 2),
+                neq(y, 3)
+            ])))
+            .to_string(),
+            "((_0 _1) : (((_1 . 2)) ((_1 . 3))))"
         );
     }
 
@@ -796,6 +843,84 @@ mod minimal_constraints {
             AsScheme(run_all(|q| fresh(move |x, y| neq(q, cons(x, y))))).to_string(),
             "((_0))"
         );
+    }
+}
+
+#[cfg(test)]
+mod mininal_contraints_add {
+    use crate::{mininal_contraints_add, set, Term, Var};
+
+    #[test]
+    fn equal() {
+        let mut minimal = Vec::new();
+        mininal_contraints_add(&mut minimal, set!((Var(0), Term::Value(0))));
+        mininal_contraints_add(&mut minimal, set!((Var(0), Term::Value(0))));
+
+        let result = vec![set!((Var(0), Term::Value(0)))];
+
+        assert_eq!(minimal, result);
+    }
+
+    #[test]
+    fn disjoint() {
+        let mut minimal = Vec::new();
+        mininal_contraints_add(&mut minimal, set!((Var(0), Term::Value(0))));
+        mininal_contraints_add(&mut minimal, set!((Var(1), Term::Value(1))));
+
+        let result = vec![
+            set!((Var(0), Term::Value(0))),
+            set!((Var(1), Term::Value(1))),
+        ];
+
+        assert_eq!(minimal, result);
+    }
+
+    #[test]
+    fn joint() {
+        let mut minimal = Vec::new();
+        mininal_contraints_add(
+            &mut minimal,
+            set!((Var(0), Term::Value(0)), (Var(1), Term::Value(1))),
+        );
+        mininal_contraints_add(
+            &mut minimal,
+            set!((Var(0), Term::Value(0)), (Var(2), Term::Value(2))),
+        );
+
+        let result = vec![
+            set!((Var(0), Term::Value(0)), (Var(1), Term::Value(1))),
+            set!((Var(0), Term::Value(0)), (Var(2), Term::Value(2))),
+        ];
+
+        assert_eq!(minimal, result);
+    }
+
+    #[test]
+    fn subset() {
+        let mut minimal = Vec::new();
+        mininal_contraints_add(
+            &mut minimal,
+            set!((Var(0), Term::Value(0)), (Var(1), Term::Value(1))),
+        );
+        mininal_contraints_add(&mut minimal, set!((Var(0), Term::Value(0))));
+
+        let result = vec![set!((Var(0), Term::Value(0)))];
+
+        assert_eq!(minimal, result);
+    }
+
+    #[test]
+    fn superset() {
+        let mut minimal = Vec::new();
+        mininal_contraints_add(&mut minimal, set!((Var(0), Term::Value(0))));
+        mininal_contraints_add(
+            &mut minimal,
+            set!((Var(0), Term::Value(0)), (Var(1), Term::Value(1))),
+        );
+
+        let result = vec![set!((Var(0), Term::Value(0)))];
+
+        assert_eq!(minimal, result);
     }
 }
 

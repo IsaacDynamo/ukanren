@@ -1,4 +1,5 @@
 mod display;
+mod set;
 mod test;
 
 use std::{
@@ -442,11 +443,38 @@ pub fn reify<const N: usize>(state: &State) -> [Term; N] {
     std::array::from_fn(|v| state.resolve(Var::from_usize(v)))
 }
 
+fn mininal_contraints_add(
+    minimal_constraints: &mut Vec<HashSet<(Var, Term)>>,
+    new_constraint: HashSet<(Var, Term)>,
+) {
+    assert!(!new_constraint.is_empty());
+
+    let mut fallthrough = false;
+    minimal_constraints.retain(|constraint| {
+        if fallthrough {
+            return true;
+        }
+
+        use set::Relation::*;
+        match set::relation(&new_constraint, constraint) {
+            Subset => false,
+            Equal | Superset => {
+                fallthrough = true;
+                true
+            }
+            Joint | Disjoint => true,
+        }
+    });
+
+    if !fallthrough {
+        minimal_constraints.push(new_constraint);
+    }
+}
+
 pub fn purify<const N: usize>(state: &State) -> Constraints {
     // Find all reachable variables
     let mut reachable_vars = HashSet::new();
     for v in 0..N {
-
         /// Insert the Vars of a Term into a set
         fn insert(set: &mut HashSet<Var>, term: &Term) {
             match term {
@@ -463,64 +491,45 @@ pub fn purify<const N: usize>(state: &State) -> Constraints {
         insert(&mut reachable_vars, &term);
     }
 
-    // Initial constraints, only keep constraints with constants or reachable variables
-    let mut constraints = Vec::from_iter(
-        state.constraints
-        .iter()
-        .map(|vec| HashSet::from_iter(
-            vec
+    // Initial constraints, only keep constraint terms with constants or reachable variables
+    let constraints = Vec::from_iter(
+        state
+            .constraints
             .iter()
-            .map(|(var, term)| (*var, deep_resolve(term, &state.map)))
-            .filter(|(var, term)| {
-                fn only_reachable(term: &Term, set: &HashSet<Var>) -> bool {
-                    match term {
-                        Term::Cons(a, b) => only_reachable(a, set) && only_reachable(b, set),
-                        Term::Var(v) => set.contains(v),
-                        _ => true,
-                    }
-                }
+            .map(|vec| {
+                HashSet::from_iter(
+                    vec.iter()
+                        .map(|(var, term)| (*var, deep_resolve(term, &state.map)))
+                        .filter(|(var, term)| {
+                            fn only_reachable(term: &Term, set: &HashSet<Var>) -> bool {
+                                match term {
+                                    Term::Cons(a, b) => {
+                                        only_reachable(a, set) && only_reachable(b, set)
+                                    }
+                                    Term::Var(v) => set.contains(v),
+                                    _ => true,
+                                }
+                            }
 
-                reachable_vars.contains(var) && only_reachable(term, &reachable_vars)
-            }))
-        )
+                            reachable_vars.contains(var) && only_reachable(term, &reachable_vars)
+                        }),
+                )
+            })
+            .filter(|set| !set.is_empty()),
     );
 
     // Start with empty set
     let mut minimal_constraints = Vec::<HashSet<(Var, Term)>>::new();
 
     // Process constraints
-    while let Some(mut new_constraint) = constraints.pop() {
-
-        let C = std::mem::take(&mut minimal_constraints);
-        for constraint in C {
-
-            if new_constraint.is_empty() {
-                minimal_constraints.push(constraint);
-                continue
-            }
-
-            if constraint.is_subset(&new_constraint) {
-                new_constraint = new_constraint.difference(&constraint).cloned().collect();
-                minimal_constraints.push(constraint);
-            } else if constraint.is_superset(&new_constraint) {
-                // drop
-            } else if constraint.is_disjoint(&new_constraint){
-                minimal_constraints.push(constraint)
-            } else {
-                let reduced = constraint.difference(&new_constraint).cloned().collect();
-                constraints.push(reduced);
-            }
-        }
-
-        if !new_constraint.is_empty() {
-            minimal_constraints.push(new_constraint);
-        }
+    for new_constraint in constraints {
+        mininal_contraints_add(&mut minimal_constraints, new_constraint);
     }
 
-    // Sort output so units test can use string comparison
+    // Convert inner HashSet to a Vec
     minimal_constraints
         .into_iter()
-        .map(|s|Vec::from_iter(s.into_iter()))
+        .map(|s| Vec::from_iter(s.into_iter()))
         .collect()
 }
 
