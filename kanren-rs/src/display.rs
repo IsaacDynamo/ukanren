@@ -66,6 +66,13 @@ impl DisplayScheme for Term {
         match self {
             Term::Var(x) => f.write_fmt(format_args!("_{}", x.0)),
             Term::Value(x) => f.write_fmt(format_args!("{x}")),
+            Term::String(x) => {
+                if x.contains(' ') {
+                    f.write_fmt(format_args!("\"{x}\""))
+                } else {
+                    f.write_fmt(format_args!("{x}"))
+                }
+            }
             Term::Null => f.write_str("()"),
             Term::Cons(head, tail) => {
                 f.write_str("(")?;

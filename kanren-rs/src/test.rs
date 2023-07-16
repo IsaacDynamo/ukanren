@@ -151,6 +151,27 @@ mod tests {
     }
 
     #[test]
+    fn test_list() {
+        let a = list!();
+        let b = NULL;
+        assert_eq!(a, b);
+
+        let a = list!(1, 2, 3);
+        let b = cons(1, cons(2, cons(3, NULL)));
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn test_string() {
+        let a = "hello";
+        let b = String::from("world");
+        let c = &String::from("!");
+        let l = list!(a, b, c);
+
+        assert_eq!(AsScheme(l).to_string(), "(hello world !)");
+    }
+
+    #[test]
     fn test_concat() {
         fn concat(l: Var, r: Var, out: Var) -> Goal {
             fresh(move |a, d, res| {
@@ -179,10 +200,19 @@ mod tests {
         );
     }
 
+    fn bounded(set: Var) -> Goal {
+        fresh(move |head, tail| {
+            cond([
+                vec![eq(set, NULL)],
+                vec![eq(set, cons(head, tail)), jield(move || bounded(tail))],
+            ])
+        })
+    }
+
     fn contains(set: Var, x: Var) -> Goal {
         fresh(move |head, tail| {
             cond([
-                vec![eq(set, cons(head, tail)), eq(head, x)],
+                vec![eq(set, cons(head, tail)), eq(head, x), bounded(tail)],
                 vec![
                     eq(set, cons(head, tail)),
                     neq(head, x),
@@ -650,6 +680,46 @@ mod tests {
             "((1) (2) (3) (4) (5) (6) (7) (8) (9))"
         );
     }
+
+    #[test]
+    fn example2() {
+        fn humans(x: Var) -> Goal {
+            eq(x, list!("alice", "bob"))
+        }
+
+        fn adult(x: Var, a: Var, c: Var) -> Goal {
+            all([contains(a, x), excludes(c, x)])
+        }
+
+        fn child(x: Var, a: Var, c: Var) -> Goal {
+            all([excludes(a, x), contains(c, x)])
+        }
+
+        fn population(hs: Var, a: Var, c: Var) -> Goal {
+            fresh(move |h, ht| {
+                cond([
+                    vec![eq(hs, NULL)],
+                    vec![
+                        eq(hs, cons(h, ht)),
+                        any([adult(h, a, c), child(h, a, c)]),
+                        jield(move || population(ht, a, c)),
+                    ],
+                ])
+            })
+        }
+
+        let result = AsScheme(run(6, |a, c| {
+            fresh(move |x| all([humans(x), population(x, a, c)]))
+        }))
+        .to_string();
+
+        assert!(result.contains("((bob) (alice))"));
+        assert!(result.contains("((alice) (bob))"));
+        assert!(result.contains("((bob alice) ())"));
+        assert!(result.contains("(() (bob alice))"));
+        assert!(result.contains("(() (alice bob))"));
+        assert!(result.contains("((alice bob) ())"));
+    }
 }
 
 #[cfg(test)]
@@ -922,6 +992,31 @@ mod mininal_contraints_add {
 
         assert_eq!(minimal, result);
     }
+}
+
+#[test]
+fn example1() {
+    use crate::display::AsScheme;
+    use crate::*;
+
+    fn facts(x: Var, y: Var, z: Var) -> Goal {
+        cond([
+            vec![eq(x, "male"), eq(y, "monarch"), eq(z, "king")],
+            vec![eq(x, "female"), eq(y, "monarch"), eq(z, "queen")],
+        ])
+    }
+
+    assert_eq!(
+        AsScheme(run_all(|q| fresh(move |king, male, female, x| all([
+            eq(king, "king"),
+            eq(male, "male"),
+            eq(female, "female"),
+            facts(male, x, king),
+            facts(female, x, q)
+        ]))))
+        .to_string(),
+        "((queen))"
+    );
 }
 
 // println!("{:?}", eq(cons(1,2), cons(3, NULL)));

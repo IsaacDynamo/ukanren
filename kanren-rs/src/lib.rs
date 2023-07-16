@@ -30,6 +30,7 @@ impl Var {
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Term {
     Value(i32), // Todo make generic
+    String(String),
     Var(Var),
     Cons(Rc<Term>, Rc<Term>),
     Null,
@@ -47,11 +48,37 @@ impl From<Var> for Term {
     }
 }
 
+impl From<&str> for Term {
+    fn from(s: &str) -> Self {
+        Self::String(s.to_string())
+    }
+}
+
+impl From<String> for Term {
+    fn from(s: String) -> Self {
+        Self::String(s)
+    }
+}
+
+impl From<&String> for Term {
+    fn from(s: &String) -> Self {
+        Self::String(s.clone())
+    }
+}
+
 pub fn cons(a: impl Into<Term>, b: impl Into<Term>) -> Term {
     Term::Cons(Rc::new(a.into()), Rc::new(b.into()))
 }
 
 pub const NULL: Term = Term::Null;
+
+#[macro_export]
+macro_rules! list {
+    () => { Term::Null };
+    ($head:expr $(, $tail:expr )*) => {
+        cons($head, list!( $( $tail ),* ))
+    };
+}
 
 type Mapping = HashMap<Var, Term>;
 
@@ -105,6 +132,7 @@ impl Unify {
         match (a, b) {
             (Var(a), Var(b)) if a == b => Some(()),
             (Value(a), Value(b)) if a == b => Some(()),
+            (String(a), String(b)) if a == b => Some(()),
             (Null, Null) => Some(()),
             (Var(a), Var(b)) if a != b => {
                 let var = max(a, b);
@@ -386,6 +414,27 @@ impl<T: Fn(Var, Var, Var) -> Goal> Binding<3> for T {
         let y = state.var();
         let z = state.var();
         self(x, y, z)
+    }
+}
+
+impl<T: Fn(Var, Var, Var, Var) -> Goal> Binding<4> for T {
+    fn bind(self, state: &mut State) -> Goal {
+        let v1 = state.var();
+        let v2 = state.var();
+        let v3 = state.var();
+        let v4 = state.var();
+        self(v1, v2, v3, v4)
+    }
+}
+
+impl<T: Fn(Var, Var, Var, Var, Var) -> Goal> Binding<5> for T {
+    fn bind(self, state: &mut State) -> Goal {
+        let v1 = state.var();
+        let v2 = state.var();
+        let v3 = state.var();
+        let v4 = state.var();
+        let v5 = state.var();
+        self(v1, v2, v3, v4, v5)
     }
 }
 
