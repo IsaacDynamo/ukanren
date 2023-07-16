@@ -1019,6 +1019,35 @@ fn example1() {
     );
 }
 
+
+#[test]
+fn term_args() {
+    use crate::display::AsScheme;
+    use crate::*;
+
+    fn facts(x: impl Into<Term>, y: impl Into<Term>, z: impl Into<Term>) -> Goal {
+        let x = &x.into();
+        let y = &y.into();
+        let z = &z.into();
+
+        all([
+            cond([
+                vec![eq(x, "male"), eq(y, "monarch"), eq(z, "king")],
+                vec![eq(x, "female"), eq(y, "monarch"), eq(z, "queen")],
+            ])
+        ])
+    }
+
+    assert_eq!(
+        AsScheme(run_all(|q| fresh(move |x| all([
+            facts("male", x, "king"),
+            facts("female", x, q),
+        ]))))
+        .to_string(),
+        "((queen))"
+    );
+}
+
 // println!("{:?}", eq(cons(1,2), cons(3, NULL)));
 
 //println!("{:?}", and(x, y, z));

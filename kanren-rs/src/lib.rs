@@ -36,6 +36,12 @@ pub enum Term {
     Null,
 }
 
+impl From<&Term> for Term {
+    fn from(t: &Term) -> Self {
+        t.clone()
+    }
+}
+
 impl From<i32> for Term {
     fn from(i: i32) -> Self {
         Self::Value(i)
@@ -203,7 +209,7 @@ pub fn either(a: Goal, b: Goal) -> Goal {
     Goal::Either(Rc::new(a), Rc::new(b))
 }
 
-pub fn fresh<const N: usize>(f: impl Binding<N> + Copy + 'static) -> Goal {
+pub fn fresh<const N: usize>(f: impl Binding<N> + 'static) -> Goal {
     Goal::Fresh(Rc::new(move |state| f.bind(state)), RefCell::new(None))
 }
 
@@ -384,24 +390,24 @@ impl Goal {
 }
 
 pub trait Binding<const N: usize> {
-    fn bind(self, state: &mut State) -> Goal;
+    fn bind(&self, state: &mut State) -> Goal;
 }
 
 impl Binding<0> for Goal {
-    fn bind(self, _: &mut State) -> Goal {
-        self
+    fn bind(&self, _: &mut State) -> Goal {
+        self.clone()
     }
 }
 
 impl<T: Fn(Var) -> Goal> Binding<1> for T {
-    fn bind(self, state: &mut State) -> Goal {
+    fn bind(&self, state: &mut State) -> Goal {
         let x = state.var();
         self(x)
     }
 }
 
 impl<T: Fn(Var, Var) -> Goal> Binding<2> for T {
-    fn bind(self, state: &mut State) -> Goal {
+    fn bind(&self, state: &mut State) -> Goal {
         let x = state.var();
         let y = state.var();
         self(x, y)
@@ -409,7 +415,7 @@ impl<T: Fn(Var, Var) -> Goal> Binding<2> for T {
 }
 
 impl<T: Fn(Var, Var, Var) -> Goal> Binding<3> for T {
-    fn bind(self, state: &mut State) -> Goal {
+    fn bind(&self, state: &mut State) -> Goal {
         let x = state.var();
         let y = state.var();
         let z = state.var();
@@ -418,7 +424,7 @@ impl<T: Fn(Var, Var, Var) -> Goal> Binding<3> for T {
 }
 
 impl<T: Fn(Var, Var, Var, Var) -> Goal> Binding<4> for T {
-    fn bind(self, state: &mut State) -> Goal {
+    fn bind(&self, state: &mut State) -> Goal {
         let v1 = state.var();
         let v2 = state.var();
         let v3 = state.var();
@@ -428,7 +434,7 @@ impl<T: Fn(Var, Var, Var, Var) -> Goal> Binding<4> for T {
 }
 
 impl<T: Fn(Var, Var, Var, Var, Var) -> Goal> Binding<5> for T {
-    fn bind(self, state: &mut State) -> Goal {
+    fn bind(&self, state: &mut State) -> Goal {
         let v1 = state.var();
         let v2 = state.var();
         let v3 = state.var();
