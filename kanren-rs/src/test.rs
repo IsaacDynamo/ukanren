@@ -1048,6 +1048,84 @@ fn term_args() {
     );
 }
 
+#[test]
+fn paradox() {
+    use crate::display::AsScheme;
+    use crate::*;
+
+    fn eqv(a: Var, b: Var, result: Var) -> Goal {
+        cond([
+            [eq(a, b), eq(result, "true")],
+            [neq(a, b), eq(result, "false")],
+        ])
+    }
+
+    // This sentence is true
+    // sentence = (sentence == true)
+    let result = run_all(|sentence| fresh(move |x| {
+        all([
+            eq(x, "true"),
+            eqv(sentence, x, sentence)
+        ])
+    }));
+    assert_eq!(AsScheme(result).to_string(), "((true) (false))");
+
+    fn not(x: Var, y: Var) -> Goal {
+        cond([
+            [eq(x, "true"), eq(y, "false")],
+            [eq(x, "false"), eq(y, "true")],
+        ])
+    }
+
+    // This sentence is not true
+    // sentence = !(sentence == true)
+    let result = run_all(|sentence| fresh(move |x, y| {
+        all([
+            eq(x, "true"),
+            eqv(sentence, x, y),
+            not(y, sentence),
+        ])
+    }));
+    assert_eq!(AsScheme(result).to_string(), "()");
+
+    // https://en.wikipedia.org/wiki/Three-valued_logic
+    // LP (Logic of Paradox)
+
+    // logical equivalence or biconditional, <->
+    fn lp_leq(a: Var, b: Var, result: Var) -> Goal {
+        cond([
+            vec![eq(a, "false"), eq(b, "false"), eq(result, "true")],
+            vec![eq(a, "true"), eq(b, "true"), eq(result, "true")],
+            vec![eq(a, "false"), eq(b, "true"), eq(result, "false")],
+            vec![eq(a, "true"), eq(b, "false"), eq(result, "false")],
+            vec![eq(a, "true"), eq(b, "undecided"), eq(result, "undecided")],
+            vec![eq(a, "false"), eq(b, "undecided"), eq(result, "undecided")],
+            vec![eq(a, "undecided"), eq(b, "true"), eq(result, "undecided")],
+            vec![eq(a, "undecided"), eq(b, "false"), eq(result, "undecided")],
+            vec![eq(a, "undecided"), eq(b, "undecided"), eq(result, "undecided")], // In other logics this can be true
+        ])
+    }
+
+    fn lp_not(x: Var, y: Var) -> Goal {
+        cond([
+            [eq(x, "true"), eq(y, "false")],
+            [eq(x, "undecided"), eq(y, "undecided")],
+            [eq(x, "false"), eq(y, "true")],
+        ])
+    }
+
+    // This sentence is not true
+    // sentence = !(sentence <-> true)
+    let result = run_all(|sentence| fresh(move |x, y| {
+        all([
+            eq(x, "true"),
+            lp_leq(sentence, y, sentence),
+            lp_not(y, x),
+        ])
+    }));
+    assert_eq!(AsScheme(result).to_string(), "((undecided))");
+}
+
 // println!("{:?}", eq(cons(1,2), cons(3, NULL)));
 
 //println!("{:?}", and(x, y, z));
