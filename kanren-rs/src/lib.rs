@@ -81,9 +81,26 @@ pub const NULL: Term = Term::Null;
 #[macro_export]
 macro_rules! list {
     () => { Term::Null };
-    ($head:expr $(, $tail:expr )*) => {
+    ($head:expr $(, $tail:expr)* $(,)?) => {
         cons($head, list!( $( $tail ),* ))
     };
+}
+
+#[macro_export]
+macro_rules! goal {
+    ( $name:ident, ($($terms:ident),+ ) $goal:block) => (
+        paste::paste!{
+            fn $name ( $($terms : impl Into<Term>),+ ) -> Goal {
+                $(let [<term_ $terms>]: Term = $terms.into();)+
+                fresh(move | $( [<var_ $terms>] ),+ | all([
+                    $(eq(&[<term_ $terms>], [<var_ $terms>]),)+
+                    (| $($terms),+ | $goal)(
+                        $([<var_ $terms>]),+
+                    )
+                ]))
+            }
+        }
+    )
 }
 
 type Mapping = HashMap<Var, Term>;

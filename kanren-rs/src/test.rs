@@ -1286,6 +1286,26 @@ fn paradox() {
     assert_eq!(AsScheme(result).to_string(), "((undecided))");
 }
 
+#[test]
+fn goal_macro() {
+    use crate::display::AsScheme;
+    use crate::*;
+
+    goal!(eqv, (a, b, result) {
+        cond([
+            [eq(a, b), eq(result, "true")],
+            [neq(a, b), eq(result, "false")],
+        ])
+    });
+
+    let result = run_all(|a,b,c| fresh(move |_| all([
+        eqv("Hello", 42, a),
+        eqv(a, "false", b),
+        eqv(b, "true", c),
+    ])));
+    assert_eq!(AsScheme(result).to_string(), "((false true true))");
+}
+
 // println!("{:?}", eq(cons(1,2), cons(3, NULL)));
 
 //println!("{:?}", and(x, y, z));
