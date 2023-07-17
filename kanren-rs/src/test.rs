@@ -1092,6 +1092,123 @@ fn three_brothers() {
 }
 
 #[test]
+fn three_brothers_v2() {
+    use crate::display::AsScheme;
+    use crate::*;
+
+    fn facts(f: Var, yourself: Var) -> Goal {
+        eq(f, list!(
+            list!("obj#john", "named", "John"),
+            list!("obj#john", "tells", "lies"),
+            list!("obj#james", "named", "James"),
+            list!("obj#james", "tells", "lies"),
+            list!("obj#william", "named", "William"),
+            list!("obj#william", "tells", "truth"),
+            list!(yourself, "is", "You")
+        ))
+    }
+
+    fn bounded(set: Var) -> Goal {
+        fresh(move |head, tail| {
+            cond([
+                vec![eq(set, NULL)],
+                vec![eq(set, cons(head, tail)), jield(move || bounded(tail))],
+            ])
+        })
+    }
+
+    fn contains(set: Var, x: Var) -> Goal {
+        fresh(move |head, tail| {
+            cond([
+                vec![eq(set, cons(head, tail)), eq(head, x), bounded(tail)],
+                vec![
+                    eq(set, cons(head, tail)),
+                    neq(head, x),
+                    jield(move || contains(tail, x)),
+                ],
+            ])
+        })
+    }
+
+    fn excludes(set: Var, x: Var) -> Goal {
+        fresh(move |head, tail| {
+            cond([
+                vec![eq(set, NULL)],
+                vec![
+                    eq(set, cons(head, tail)),
+                    neq(head, x),
+                    jield(move || excludes(tail, x)),
+                ],
+            ])
+        })
+    }
+
+    fn not(a: Var, b: Var) -> Goal {
+        cond([
+            [eq(a, "yes"), eq(b, "no")],
+            [eq(a, "no"), eq(b, "yes")],
+        ])
+    }
+
+    fn says(tells: Var, result: Var, answer: Var) -> Goal {
+        cond([
+            [eq(tells, "truth"), eq(result,answer)],
+            [eq(tells, "lies"), not(result,answer)],
+        ])
+    }
+
+    fn question(q: Var, f: Var, result: Var) -> Goal {
+        fresh(move |id, prop, value| fresh( move |i, a, b| all([
+            eq(q, list!(id, prop, value)),
+            any([
+                eq(a, list!(i, "is", id)),
+                eq(a, list!(i, "named", id))
+            ]),
+            eq(b, list!(i, prop, value)),
+            contains(f, a),
+            cond([
+            [
+                contains(f, b),
+                eq(result, "yes"),
+            ], [
+                excludes(f, b),
+                eq(result, "no"),
+            ]])
+        ])))
+    }
+
+    // Find question and answer that would identify John
+    let result = run_all(|q, unique| fresh(move |common| {
+        all([
+            neq(unique, common),
+            fresh(move |tells, result, f,yourself | all([
+                eq(yourself, "obj#john"),
+                eq(tells, "lies"),
+                facts(f, yourself),
+                question(q, f, result),
+                says(tells, result, unique),
+            ])),
+            fresh(move |tells, result, f, yourself| all([
+                eq(yourself, "obj#james"),
+                eq(tells, "lies"),
+                facts(f, yourself),
+                question(q, f, result),
+                says(tells, result, common),
+            ])),
+            fresh(move |tells, result, f, yourself| all([
+                eq(yourself, "obj#william"),
+                eq(tells, "truth"),
+                facts(f, yourself),
+                question(q, f, result),
+                says(tells, result, common),
+            ])),
+        ])
+    }));
+
+    assert_eq!(AsScheme(result).to_string(), "(((You named James) yes) ((James is You) yes))");
+}
+
+#[test]
 fn paradox() {
     use crate::display::AsScheme;
     use crate::*;
