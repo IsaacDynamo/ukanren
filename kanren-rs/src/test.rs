@@ -1049,6 +1049,49 @@ fn term_args() {
 }
 
 #[test]
+fn three_brothers() {
+    use crate::display::AsScheme;
+    use crate::*;
+
+    fn brothers(name: Var, tells: Var) -> Goal {
+        cond([
+            [eq(name, "John"), eq(tells, "lies")],
+            [eq(name, "James"), eq(tells, "lies")],
+            [eq(name, "William"), eq(tells, "truth")]
+        ])
+    }
+
+    fn is(a: Var, b: Var, answer: Var) -> Goal {
+        cond([
+            [eq(a,b), eq(answer, "yes")],
+            [neq(a,b), eq(answer, "no")],
+        ])
+    }
+
+    fn says(tells: Var, result: Var, answer: Var) -> Goal {
+        cond([
+            [eq(tells, "truth"), eq(result, "yes"), eq(answer, "yes")],
+            [eq(tells, "truth"), eq(result, "no"), eq(answer, "no")],
+            [eq(tells, "lies"), eq(result, "yes"), eq(answer, "no")],
+            [eq(tells, "lies"), eq(result, "no"), eq(answer, "yes")]
+        ])
+    }
+
+    // Hardcoded question "Is your name ...?"
+    // Query will find what name to ask, and what unique answer Johns will give.
+    let result = run_all(|name, unique| fresh(move |common| {
+        all([
+            neq(unique, common),
+            fresh(move |your_name, tells, result| all([eq(your_name, "John"), brothers(your_name, tells), is(your_name, name, result), says(tells, result, unique) ])),
+            fresh(move |your_name, tells, result| all([eq(your_name, "James"), brothers(your_name, tells), is( your_name, name, result), says(tells, result, common) ])),
+            fresh(move |your_name, tells, result| all([eq(your_name, "William"), brothers(your_name, tells), is(your_name, name, result), says(tells, result, common) ])),
+        ])
+    }));
+
+    assert_eq!(AsScheme(result).to_string(), "((James yes))");
+}
+
+#[test]
 fn paradox() {
     use crate::display::AsScheme;
     use crate::*;
