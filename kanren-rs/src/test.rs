@@ -1096,18 +1096,7 @@ fn three_brothers_v2() {
     use crate::display::AsScheme;
     use crate::*;
 
-    fn facts(f: Var, yourself: Var) -> Goal {
-        eq(f, list!(
-            list!("obj#john", "named", "John"),
-            list!("obj#john", "tells", "lies"),
-            list!("obj#james", "named", "James"),
-            list!("obj#james", "tells", "lies"),
-            list!("obj#william", "named", "William"),
-            list!("obj#william", "tells", "truth"),
-            list!(yourself, "is", "You")
-        ))
-    }
-
+    goal!(
     fn bounded(set: Var) -> Goal {
         fresh(move |head, tail| {
             cond([
@@ -1115,8 +1104,9 @@ fn three_brothers_v2() {
                 vec![eq(set, cons(head, tail)), jield(move || bounded(tail))],
             ])
         })
-    }
+    });
 
+    goal!(
     fn contains(set: Var, x: Var) -> Goal {
         fresh(move |head, tail| {
             cond([
@@ -1128,8 +1118,9 @@ fn three_brothers_v2() {
                 ],
             ])
         })
-    }
+    });
 
+    goal!(
     fn excludes(set: Var, x: Var) -> Goal {
         fresh(move |head, tail| {
             cond([
@@ -1141,7 +1132,23 @@ fn three_brothers_v2() {
                 ],
             ])
         })
-    }
+    });
+
+    goal!(
+    fn set_insert(set: Var, x: Var, result: Var) -> Goal {
+        fresh(move |head, tail, c| {
+            cond([
+                vec![eq(set, NULL), eq(result, cons(x, NULL))],
+                vec![eq(set, cons(head, tail)), eq(head, x), eq(result, set)],
+                vec![
+                    eq(set, cons(head, tail)),
+                    neq(head, x),
+                    eq(result, cons(head, c)),
+                    jield(move || set_insert(tail, x, c)),
+                ],
+            ])
+        })
+    });
 
     fn not(a: Var, b: Var) -> Goal {
         cond([
@@ -1150,58 +1157,60 @@ fn three_brothers_v2() {
         ])
     }
 
+    goal!(
     fn says(tells: Var, result: Var, answer: Var) -> Goal {
         cond([
-            [eq(tells, "truth"), eq(result,answer)],
-            [eq(tells, "lies"), not(result,answer)],
+            [eq(tells, "truth"), eq(result, answer)],
+            [eq(tells, "lies"), not(result, answer)],
         ])
-    }
+    });
 
-    fn question(q: Var, f: Var, result: Var) -> Goal {
-        fresh(move |id, prop, value| fresh( move |i, a, b| all([
-            eq(q, list!(id, prop, value)),
+    goal!(
+    fn query(question: Var, facts: Var, result: Var) -> Goal {
+        fresh(move |index, identifier, prop, value| all([
+            eq(question, list!(identifier, prop, value)),
             any([
-                eq(a, list!(i, "is", id)),
-                eq(a, list!(i, "named", id))
+                contains(facts, list!(index, "is", identifier)),
+                contains(facts, list!(index, "named", identifier))
             ]),
-            eq(b, list!(i, prop, value)),
-            contains(f, a),
             cond([
-            [
-                contains(f, b),
-                eq(result, "yes"),
-            ], [
-                excludes(f, b),
-                eq(result, "no"),
-            ]])
-        ])))
-    }
+                [contains(facts, list!(index, prop, value)), eq(result, "yes")],
+                [excludes(facts, list!(index, prop, value)), eq(result, "no")]
+            ])
+        ]))
+    });
 
-    // Find question and answer that would identify John
-    let result = run_all(|q, unique| fresh(move |common| {
+    goal!(
+    fn ask_question(index: Var, question: Var, answer: Var) -> Goal {
+        fresh(move |result, facts,my_facts, tells | all([
+            get_facts(facts),
+            set_insert(facts, list!(index, "is", "You"), my_facts),
+            query(question, my_facts, result),
+            contains(facts, list!(index, "tells", tells)),
+            says(tells, result, answer),
+        ]))
+    });
+
+    goal!(
+    fn get_facts(f: Var) -> Goal {
+        eq(f, list!(
+            list!("obj#john", "named", "John"),
+            list!("obj#john", "tells", "lies"),
+            list!("obj#james", "named", "James"),
+            list!("obj#james", "tells", "lies"),
+            list!("obj#william", "named", "William"),
+            list!("obj#william", "tells", "truth"),
+        ))
+    });
+
+    // Find question and answer that would uniquely identify John
+    let result = run_all(|question, answer_john| fresh(move |answer_james, answer_william| {
         all([
-            neq(unique, common),
-            fresh(move |tells, result, f,yourself | all([
-                eq(yourself, "obj#john"),
-                eq(tells, "lies"),
-                facts(f, yourself),
-                question(q, f, result),
-                says(tells, result, unique),
-            ])),
-            fresh(move |tells, result, f, yourself| all([
-                eq(yourself, "obj#james"),
-                eq(tells, "lies"),
-                facts(f, yourself),
-                question(q, f, result),
-                says(tells, result, common),
-            ])),
-            fresh(move |tells, result, f, yourself| all([
-                eq(yourself, "obj#william"),
-                eq(tells, "truth"),
-                facts(f, yourself),
-                question(q, f, result),
-                says(tells, result, common),
-            ])),
+            neq(answer_john, answer_james),
+            neq(answer_john, answer_william),
+            ask_question("obj#john", question, answer_john),
+            ask_question("obj#james", question, answer_james),
+            ask_question("obj#william", question, answer_william),
         ])
     }));
 
@@ -1291,7 +1300,8 @@ fn goal_macro() {
     use crate::display::AsScheme;
     use crate::*;
 
-    goal!(eqv, (a, b, result) {
+    goal!(
+    fn eqv(a: Var, b: Var, result: Var) -> Goal {
         cond([
             [eq(a, b), eq(result, "true")],
             [neq(a, b), eq(result, "false")],

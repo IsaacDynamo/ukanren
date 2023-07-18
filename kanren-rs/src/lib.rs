@@ -88,7 +88,7 @@ macro_rules! list {
 
 #[macro_export]
 macro_rules! goal {
-    ( $name:ident, ($($terms:ident),+ ) $goal:block) => (
+    ( fn $name:ident ($($terms:ident : Var ),+ ) -> Goal $goal:block)  => (
         paste::paste!{
             fn $name ( $($terms : impl Into<Term>),+ ) -> Goal {
                 $(let [<term_ $terms>]: Term = $terms.into();)+
