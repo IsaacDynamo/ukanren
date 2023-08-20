@@ -1182,7 +1182,7 @@ fn three_brothers_v2() {
 
     goal!(
     fn ask_question(index: Var, question: Var, answer: Var) -> Goal {
-        fresh(move |result, facts,my_facts, tells | all([
+        fresh(move |result, facts, my_facts, tells| all([
             get_facts(facts),
             set_insert(facts, list!(index, "is", "You"), my_facts),
             query(question, my_facts, result),
@@ -1314,6 +1314,216 @@ fn goal_macro() {
         eqv(b, "true", c),
     ])));
     assert_eq!(AsScheme(result).to_string(), "((false true true))");
+}
+
+#[test]
+fn interpeter() {
+    use crate::display::AsScheme;
+    use crate::*;
+
+    fn append(a: Var, b: Var, c: Var) -> Goal {
+        cond([
+            vec![eq(a, NULL), eq(c, b)],
+            vec![fresh(move |head, tail, x|
+                all([eq(a, cons(head, tail)), eq(c, cons(head, x)), jield(move || append(tail, b, x))])
+            )],
+        ])
+    }
+
+
+    // quote, atom, eq, car, cdr, cons and cond
+
+    goal!(
+    fn eval(expr: Var, result: Var) -> Goal {
+        cond([
+            vec![eq(expr, 1), eq(result, 1)],
+            vec![eq(expr, 2), eq(result, 2)],
+            vec![eq(expr, 3), eq(result, 3)],
+            vec![eq(expr, list!("quote", result))],
+            vec![eq(expr, "nil"), eq(result, NULL)],
+            vec![eq(expr, NULL), eq(result, NULL)],
+            vec![fresh(move |list, unused, list_eval| all([eq(expr, list!("first", list)), eq(list_eval, cons(result, unused)), jield(move || eval(list, list_eval))]))],
+            vec![fresh(move |list, unused, list_eval| all([eq(expr, list!("rest", list)), eq(list_eval, cons(unused, result)), jield(move || eval(list, list_eval))]))],
+            vec![fresh(move |a, b, a_eval, b_eval| all([eq(expr, list!("cons", a, b)), eq(result, cons(a_eval, b_eval)), jield(move || eval(a, a_eval)), jield(move || eval(b, b_eval))]))],
+            vec![fresh(move |e, ee| all([eq(expr, list!("eval", e)), jield(move || eval(e, ee)), jield(move || eval(ee, result))]))],
+        ])
+    });
+
+    let result = run(10, |result|
+            eval(list!("cons", 1, list!("cons", 2, list!("cons", 3, "nil"))), result)
+        );
+    assert_eq!(AsScheme(result).to_string(), "(((1 2 3)))");
+
+    let result = run(10, |result|
+        eval(list!("quote", list!()), result)
+    );
+    assert_eq!(AsScheme(result).to_string(), "((()))");
+
+    let result = run(10, |result|
+        eval("nil", result)
+    );
+    assert_eq!(AsScheme(result).to_string(), "((()))");
+
+    let result = run(10, |result|
+        eval(list!("quote", list!("cons", 1, 2)), result)
+    );
+    assert_eq!(AsScheme(result).to_string(), "(((cons 1 2)))");
+
+    let result = run(10, |result|
+        eval(list!("eval", list!("quote", list!("cons", 1, 2))), result)
+    );
+    assert_eq!(AsScheme(result).to_string(), "(((1 . 2)))");
+
+    let result = run(10, |expr|
+        eval(expr, list!(1,2,3))
+    );
+    //assert_eq!(AsScheme(result).to_string(), "((false true true))");
+    println!("{}", AsScheme(result).to_string());
+
+
+    let result = run(3, |r|
+        eval(r, r)
+    );
+    //assert_eq!(AsScheme(result).to_string(), "((false true true))");
+    println!("{}", AsScheme(result).to_string());
+
+
+}
+
+
+#[test]
+fn json_de_ser() {
+    use crate::display::AsScheme;
+    use crate::*;
+
+
+    goal!(
+    fn member(str: Var, rem: Var, expr: Var) -> Goal {
+        fresh(move |key, value, e| all([
+            eq(str, cons(key, cons(":", e))),
+            eq(expr, cons(key, value)),
+            element(e, rem, value),
+        ]))
+    });
+
+    goal!(
+    fn members(str: Var, rem: Var, expr: Var) -> Goal {
+        cond([
+            vec![fresh(move |e| all([
+                member(str, rem, e),
+                eq(expr, list!(e)),
+            ]))],
+            vec![fresh(move |e, es, comma, ms| all([
+                eq(comma, cons(",", ms)),
+                eq(expr, cons(e, es)),
+                member(str, comma, e),
+                jield(move || members(ms, rem, es)),
+            ]))],
+        ])
+    });
+
+    goal!(
+    fn object(str: Var, rem: Var, expr: Var) -> Goal {
+        cond([
+            vec![fresh(move |tail, close| all([
+                eq(str, cons("{", tail)),
+                eq(close, cons("}", rem)),
+                members(tail, close, expr),
+            ]))],
+            vec![
+                eq(str, cons("{", cons("}", rem))),
+                eq(expr, NULL),
+            ]
+        ])
+    });
+
+    goal!(
+    fn value(str: Var, rem: Var, expr: Var) -> Goal {
+        cond([
+            vec![eq(str, cons("false", rem)), eq(expr, "#f")],
+            vec![eq(str, cons("true", rem)), eq(expr, "#t")],
+            vec![eq(str, cons(expr, rem)), eq(expr, "bye")],
+            vec![eq(str, cons(expr, rem)), eq(expr, "world")],
+            vec![eq(str, cons(expr, rem)), eq(expr, "night")],
+            vec![jield(move || object(str, rem, expr))],
+            vec![jield(move || array(str, rem, expr))],
+        ])
+    });
+
+    goal!(
+    fn element(str: Var, rem: Var, expr: Var) -> Goal {
+        value(str, rem, expr)
+    });
+
+    goal!(
+    fn elements(str: Var, rem: Var, expr: Var) -> Goal {
+        cond([
+            vec![fresh(move |e| all([
+                eq(expr, list!(e)),
+                element(str, rem, e),
+            ]))],
+            vec![fresh(move |e, es, comma, ms| all([
+                eq(comma, cons(",", ms)),
+                eq(expr, cons(e, es)),
+                element(str, comma, e),
+                jield(move || elements(ms, rem, es)),
+            ]))],
+        ])
+    });
+
+    goal!(
+    fn array(str: Var, rem: Var, expr: Var) -> Goal {
+        cond([
+            vec![fresh(move |tail, close| all([
+                eq(str, cons("[", tail)),
+                eq(close, cons("]", rem)),
+                elements(tail, close, expr),
+            ]))],
+            vec![
+                eq(str, cons("[", cons("]", rem))),
+                eq(expr, NULL),
+            ],
+        ])
+    });
+
+    goal!(
+    fn json(str: Var, expr: Var) -> Goal {
+        element(str, NULL, expr)
+    });
+
+    let result = run(1, |expr|
+        json(list!("{", "}"), expr)
+    );
+    //assert_eq!(AsScheme(result).to_string(), "((false true true))");
+    println!("{}", AsScheme(result).to_string());
+
+    let result = run(1, |expr|
+        json(list!("{", "hello", ":", "world", "}"), expr)
+    );
+    //assert_eq!(AsScheme(result).to_string(), "((false true true))");
+    println!("{}", AsScheme(result).to_string());
+
+
+    let result = run(1, |expr|
+        json( expr, list!(cons("bye", "bye")))
+    );
+    //assert_eq!(AsScheme(result).to_string(), "((false true true))");
+    println!("{}", AsScheme(result).to_string());
+
+
+    let result = run(1, |expr|
+        json(list!("{", "hello", ":", "world", ",", "good", ":", "night", "}"), expr)
+    );
+    //assert_eq!(AsScheme(result).to_string(), "((false true true))");
+    println!("{}", AsScheme(result).to_string());
+
+
+    let result = run(100, |str, expr|
+        json(str, expr)
+    );
+    //assert_eq!(AsScheme(result).to_string(), "((false true true))");
+    println!("{}", AsScheme(result).to_string());
+
 }
 
 // println!("{:?}", eq(cons(1,2), cons(3, NULL)));

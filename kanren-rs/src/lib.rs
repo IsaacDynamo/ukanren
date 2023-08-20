@@ -1,5 +1,6 @@
-mod display;
-mod set;
+pub mod display;
+pub mod set;
+pub mod list;
 mod test;
 
 use std::{
@@ -34,6 +35,23 @@ pub enum Term {
     Var(Var),
     Cons(Rc<Term>, Rc<Term>),
     Null,
+}
+
+impl Term {
+    pub fn to_vec(&self) -> Option<Vec<Term>> {
+        fn inner(term: &Term, mut list: Vec<Term>) -> Option<Vec<Term>> {
+            match term {
+                Term::Null => Some(list),
+                Term::Cons(a, b) => {
+                    let a = (*(*a)).clone();
+                    list.push(a);
+                    inner(b, list)
+                }
+                _ => None,
+            }
+        }
+        inner(self, Vec::new())
+    }
 }
 
 impl From<&Term> for Term {
@@ -81,16 +99,17 @@ pub const NULL: Term = Term::Null;
 #[macro_export]
 macro_rules! list {
     () => { Term::Null };
-    ($head:expr $(, $tail:expr)* $(,)?) => {
-        cons($head, list!( $( $tail ),* ))
+    ($a:expr, . $b:expr) => { cons($a, $b) };
+    ($head:expr $(, $tail:expr)*  $(, . $rem:expr)? $(,)?) => {
+        cons($head, list!( $( $tail ),*  $(, . $rem)? ))
     };
 }
 
 #[macro_export]
 macro_rules! goal {
-    ( fn $name:ident ($($terms:ident : Var ),+ ) -> Goal $goal:block)  => (
+    ( $pub:vis fn $name:ident ($($terms:ident : Var ),+ ) -> Goal $goal:block)  => (
         paste::paste!{
-            fn $name ( $($terms : impl Into<Term>),+ ) -> Goal {
+            $pub fn $name ( $($terms : impl Into<Term>),+ ) -> Goal {
                 $(let [<term_ $terms>]: Term = $terms.into();)+
                 fresh(move | $( [<var_ $terms>] ),+ | all([
                     $(eq(&[<term_ $terms>], [<var_ $terms>]),)+
@@ -187,7 +206,7 @@ pub struct State {
 }
 
 impl State {
-    fn resolve(&self, v: Var) -> Term {
+    pub fn resolve(&self, v: Var) -> Term {
         let term = Term::Var(v);
         deep_resolve(&term, &self.map)
     }
@@ -461,6 +480,45 @@ impl<T: Fn(Var, Var, Var, Var, Var) -> Goal> Binding<5> for T {
     }
 }
 
+impl<T: Fn(Var, Var, Var, Var, Var, Var) -> Goal> Binding<6> for T {
+    fn bind(&self, state: &mut State) -> Goal {
+        let v1 = state.var();
+        let v2 = state.var();
+        let v3 = state.var();
+        let v4 = state.var();
+        let v5 = state.var();
+        let v6 = state.var();
+        self(v1, v2, v3, v4, v5, v6)
+    }
+}
+
+impl<T: Fn(Var, Var, Var, Var, Var, Var, Var) -> Goal> Binding<7> for T {
+    fn bind(&self, state: &mut State) -> Goal {
+        let v1 = state.var();
+        let v2 = state.var();
+        let v3 = state.var();
+        let v4 = state.var();
+        let v5 = state.var();
+        let v6 = state.var();
+        let v7 = state.var();
+        self(v1, v2, v3, v4, v5, v6, v7)
+    }
+}
+
+impl<T: Fn(Var, Var, Var, Var, Var, Var, Var, Var) -> Goal> Binding<8> for T {
+    fn bind(&self, state: &mut State) -> Goal {
+        let v1 = state.var();
+        let v2 = state.var();
+        let v3 = state.var();
+        let v4 = state.var();
+        let v5 = state.var();
+        let v6 = state.var();
+        let v7 = state.var();
+        let v8 = state.var();
+        self(v1, v2, v3, v4, v5, v6, v7, v8)
+    }
+}
+
 pub struct Query<const N: usize> {
     pub goal: Goal,
     pub stream: Stream,
@@ -626,6 +684,12 @@ pub fn query<const N: usize>(f: impl Binding<N>) -> Query<N> {
 #[derive(Debug)]
 pub struct StateN<const N: usize> {
     state: State,
+}
+
+impl<const N: usize> StateN<N> {
+    pub fn reify(&self) -> [Term; N] {
+        reify::<N>(&self.state)
+    }
 }
 
 pub fn run_all<const N: usize>(f: impl Binding<N>) -> Vec<StateN<N>> {
