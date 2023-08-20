@@ -1,6 +1,6 @@
 pub mod display;
-pub mod set;
 pub mod list;
+pub mod set;
 mod test;
 
 use std::{
