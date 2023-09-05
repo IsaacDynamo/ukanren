@@ -1574,6 +1574,45 @@ fn json_de_ser() {
     println!("{}", AsScheme(result).to_string());
 }
 
+#[test]
+fn depth() {
+    use crate::*;
+
+    let mut q = query(move |x| cond([[list::contains(list!(1, 2, 3), x)]]));
+
+    assert_eq!(q.next().map(|s| s.depth), Some(0));
+    assert_eq!(q.next().map(|s| s.depth), Some(1));
+    assert_eq!(q.next().map(|s| s.depth), Some(2));
+    assert_eq!(q.next().map(|s| s.depth), None);
+}
+
+#[test]
+fn tree() {
+    use crate::*;
+
+    let mut q = query(move |x, y| {
+        cond([
+            vec![any([eq(y, 1), eq(y, 2)]), list::contains(list!(1, 2), x)],
+            vec![list::contains(list!(3, 4), x)],
+        ])
+    });
+
+    println!("{} {}", q.stream.mature.len(), q.stream.immature.len());
+
+    println!("{}", display::GoalTree(&q.goal));
+    println!("{:?}", q.next().map(|s| s.depth));
+    println!("{:?}", q.next().map(|s| s.depth));
+    println!("{:?}", q.next().map(|s| s.depth));
+    println!("{:?}", q.next().map(|s| s.depth));
+    println!("{:?}", q.next().map(|s| s.depth));
+    println!("{:?}", q.next().map(|s| s.depth));
+    println!("{:?}", q.next().map(|s| s.depth));
+
+    println!("{}", display::GoalTree(&q.goal));
+
+    println!("{}", q.id.load(Ordering::Relaxed));
+}
+
 // println!("{:?}", eq(cons(1,2), cons(3, NULL)));
 
 //println!("{:?}", and(x, y, z));

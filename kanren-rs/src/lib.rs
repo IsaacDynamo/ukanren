@@ -8,7 +8,9 @@ use std::{
     cmp::{max, min},
     collections::{HashMap, HashSet},
     fmt::Debug,
+    ops::Deref,
     rc::Rc,
+    sync::atomic::{AtomicU32, Ordering},
 };
 
 // TODO:
@@ -202,7 +204,8 @@ type Constraints = Vec<Constraint>;
 pub struct State {
     map: Mapping,
     constraints: Constraints,
-    id: u32,
+    pub depth: u32,
+    pub id: Rc<AtomicU32>,
 }
 
 impl State {
@@ -212,9 +215,10 @@ impl State {
     }
 
     fn var(&mut self) -> Var {
-        let id = self.id;
-        assert_ne!(id, u32::MAX, "Overflow");
-        self.id += 1;
+        let id = self
+            .id
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |x| x.checked_add(1))
+            .expect("ID overflow");
         Var(id)
     }
 }
@@ -225,8 +229,20 @@ pub enum Goal {
     Neq(Term, Term),
     Both(Rc<Goal>, Rc<Goal>),
     Either(Rc<Goal>, Rc<Goal>),
-    Fresh(Rc<dyn Fn(&mut State) -> Goal>, RefCell<Option<Box<Goal>>>),
-    Yield(Rc<dyn Fn() -> Goal>, Rc<RefCell<Option<Goal>>>),
+    Fresh(RefCell<FreshInner>),
+    Yield(RefCell<YieldInner>),
+}
+
+#[derive(Clone)]
+pub enum FreshInner {
+    Pending(Rc<dyn Fn(&mut State) -> Goal>),
+    Resolved(Rc<Goal>),
+}
+
+#[derive(Clone)]
+pub enum YieldInner {
+    Pending(Rc<dyn Fn() -> Goal>),
+    Resolved(Rc<Goal>),
 }
 
 pub fn eq(a: impl Into<Term>, b: impl Into<Term>) -> Goal {
@@ -246,11 +262,13 @@ pub fn either(a: Goal, b: Goal) -> Goal {
 }
 
 pub fn fresh<const N: usize>(f: impl Binding<N> + 'static) -> Goal {
-    Goal::Fresh(Rc::new(move |state| f.bind(state)), RefCell::new(None))
+    Goal::Fresh(RefCell::new(FreshInner::Pending(Rc::new(move |state| {
+        f.bind(state)
+    }))))
 }
 
 pub fn jield(f: impl Fn() -> Goal + 'static) -> Goal {
-    Goal::Yield(Rc::new(f), Rc::new(RefCell::new(None)))
+    Goal::Yield(RefCell::new(YieldInner::Pending(Rc::new(f))))
 }
 
 pub fn all(v: impl IntoIterator<Item = Goal>) -> Goal {
@@ -373,8 +391,9 @@ impl Goal {
                         if verify(&u.map, &state.constraints, &mut constraints) {
                             Stream::new(State {
                                 map: u.map,
-                                id: state.id,
                                 constraints,
+                                id: state.id.clone(),
+                                depth: state.depth,
                             })
                         } else {
                             Stream::default()
@@ -392,8 +411,9 @@ impl Goal {
                         constraints.push(u.new);
                         Stream::new(State {
                             map: state.map.clone(),
-                            id: state.id,
                             constraints,
+                            id: state.id.clone(),
+                            depth: state.depth,
                         })
                     }
                     None => Stream::new(state.clone()),
@@ -401,24 +421,38 @@ impl Goal {
             }
             Either(a, b) => append(a.call(state), b.call(state)),
             Both(a, b) => mappend(b, a.call(state)),
-            Fresh(f, node) => {
-                let mut s = state.clone();
-                let goal = f(&mut s);
-                node.replace(Some(Box::new(goal)));
-                node.borrow().as_ref().map(|f| f.call(&s)).unwrap()
+            Fresh(inner) => {
+                let mut inner = inner.borrow_mut();
+                if let FreshInner::Pending(func) = inner.deref() {
+                    let mut state = state.clone();
+                    let goal = func(&mut state);
+                    *inner = FreshInner::Resolved(Rc::new(goal));
+                }
+                match inner.deref() {
+                    FreshInner::Pending(_) => panic!("Should be resolved"),
+                    FreshInner::Resolved(goal) => goal.call(state),
+                }
             }
-            Yield(cont, node) => {
-                let state = state.clone();
-                let cont = cont.clone();
-                let node = node.clone();
+            Yield(inner) => {
+                let mut inner = inner.borrow_mut();
 
-                Stream {
-                    mature: Vec::new(),
-                    immature: vec![Box::new(move || {
-                        let goal = cont();
-                        node.replace(Some(goal));
-                        node.borrow().as_ref().map(|g| g.call(&state)).unwrap()
-                    })],
+                if let YieldInner::Pending(func) = inner.deref() {
+                    let goal = func();
+                    *inner = YieldInner::Resolved(Rc::new(goal));
+                }
+
+                match inner.deref() {
+                    YieldInner::Pending(_) => panic!("Should be resolved"),
+                    YieldInner::Resolved(goal) => {
+                        let goal = goal.clone();
+                        let mut state = state.clone();
+                        state.depth += 1;
+
+                        Stream {
+                            mature: Vec::new(),
+                            immature: vec![Box::new(move || goal.call(&state))],
+                        }
+                    }
                 }
             }
         }
@@ -521,6 +555,7 @@ impl<T: Fn(Var, Var, Var, Var, Var, Var, Var, Var) -> Goal> Binding<8> for T {
 
 pub struct Query<const N: usize> {
     pub goal: Goal,
+    pub id: Rc<AtomicU32>,
     pub stream: Stream,
     pub mature_iter: std::vec::IntoIter<State>,
     pub immature_iter: std::vec::IntoIter<Box<dyn FnOnce() -> Stream>>,
@@ -675,6 +710,7 @@ pub fn query<const N: usize>(f: impl Binding<N>) -> Query<N> {
     let stream = goal.call(&state);
     Query {
         goal,
+        id: state.id.clone(),
         stream,
         mature_iter: Vec::new().into_iter(),
         immature_iter: Vec::new().into_iter(),

@@ -1,7 +1,8 @@
-use crate::{purify, reify};
+use crate::{purify, reify, FreshInner, YieldInner};
 use crate::{Goal, StateN, Term, Var};
 
 use std::fmt::Display;
+use std::ops::Deref;
 
 pub struct AsScheme<T: DisplayScheme>(pub T);
 
@@ -130,24 +131,28 @@ impl<'a> std::fmt::Display for GoalTree<'a> {
                     inner(a, f, depth + 1)?;
                     inner(b, f, depth + 1)
                 }
-                Goal::Fresh(_, node) => {
+                Goal::Fresh(fresh_inner) => {
                     f.write_str(&spacer)?;
                     f.write_str("Fresh\n")?;
-                    if let Some(g) = node.borrow().as_ref() {
-                        inner(g, f, depth + 1)
-                    } else {
-                        f.write_str(&spacer)?;
-                        f.write_str(" -\n")
+                    let fresh_inner = fresh_inner.borrow();
+                    match fresh_inner.deref() {
+                        FreshInner::Pending(_) => {
+                            f.write_str(&spacer)?;
+                            f.write_str(" -\n")
+                        }
+                        FreshInner::Resolved(goal) => inner(goal, f, depth + 1),
                     }
                 }
-                Goal::Yield(_, node) => {
+                Goal::Yield(yield_inner) => {
                     f.write_str(&spacer)?;
                     f.write_str("Yield\n")?;
-                    if let Some(g) = node.borrow().as_ref() {
-                        inner(g, f, depth + 1)
-                    } else {
-                        f.write_str(&spacer)?;
-                        f.write_str(" -\n")
+                    let yield_inner = yield_inner.borrow();
+                    match yield_inner.deref() {
+                        YieldInner::Pending(_) => {
+                            f.write_str(&spacer)?;
+                            f.write_str(" -\n")
+                        }
+                        YieldInner::Resolved(goal) => inner(goal, f, depth + 1),
                     }
                 }
             }
