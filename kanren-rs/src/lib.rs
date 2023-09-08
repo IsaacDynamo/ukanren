@@ -223,7 +223,6 @@ impl State {
     }
 }
 
-#[derive(Clone)]
 pub enum Goal {
     Eq(Term, Term),
     Neq(Term, Term),
@@ -233,13 +232,11 @@ pub enum Goal {
     Yield(RefCell<YieldInner>),
 }
 
-#[derive(Clone)]
 pub enum FreshInner {
     Pending(Rc<dyn Fn(&mut State) -> Goal>),
     Resolved(Rc<Goal>),
 }
 
-#[derive(Clone)]
 pub enum YieldInner {
     Pending(Rc<dyn Fn() -> Goal>),
     Resolved(Rc<Goal>),
@@ -337,7 +334,7 @@ fn append(a: Stream, b: Stream) -> Stream {
     a
 }
 
-fn mappend(goal: &Goal, stream: Stream) -> Stream {
+fn mappend(goal: &Rc<Goal>, stream: Stream) -> Stream {
     let mut result = stream
         .mature
         .into_iter()
@@ -463,9 +460,9 @@ pub trait Binding<const N: usize> {
     fn bind(&self, state: &mut State) -> Goal;
 }
 
-impl Binding<0> for Goal {
+impl<T: Fn() -> Goal> Binding<0> for T {
     fn bind(&self, _: &mut State) -> Goal {
-        self.clone()
+        self()
     }
 }
 

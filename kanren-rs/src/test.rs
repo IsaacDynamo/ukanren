@@ -45,8 +45,8 @@ mod tests {
 
     #[test]
     fn test_operators() {
-        assert_eq!(AsScheme(run_all(eq(1, 1))).to_string(), "(())");
-        assert_eq!(AsScheme(run_all(eq(1, 2))).to_string(), "()");
+        assert_eq!(AsScheme(run_all(|| eq(1, 1))).to_string(), "(())");
+        assert_eq!(AsScheme(run_all(|| eq(1, 2))).to_string(), "()");
 
         assert_eq!(
             AsScheme(run_all(|x| either(eq(x, 1), eq(x, 1)))).to_string(),
@@ -75,7 +75,7 @@ mod tests {
         );
 
         assert_eq!(
-            AsScheme(run_all(fresh(|x, y| both(eq(x, 1), eq(y, 2))))).to_string(),
+            AsScheme(run_all(|| fresh(|x, y| both(eq(x, 1), eq(y, 2))))).to_string(),
             "(())"
         );
         assert_eq!(
@@ -380,7 +380,7 @@ mod tests {
         );
 
         assert_eq!(
-            AsScheme(run_all(fresh(move |x, y| all([
+            AsScheme(run_all(|| fresh(move |x, y| all([
                 eq(x, cons(1, cons(2, NULL))),
                 eq(y, cons(1, cons(2, cons(3, NULL)))),
                 subset(x, y),
@@ -390,7 +390,7 @@ mod tests {
         );
 
         assert_eq!(
-            AsScheme(run_all(fresh(move |x, y| all([
+            AsScheme(run_all(|| fresh(move |x, y| all([
                 eq(x, cons(1, cons(2, cons(3, NULL)))),
                 eq(y, cons(1, cons(2, NULL))),
                 subset(x, y),
@@ -400,7 +400,7 @@ mod tests {
         );
 
         assert_eq!(
-            AsScheme(run_all(fresh(move |x, y| all([
+            AsScheme(run_all(|| fresh(move |x, y| all([
                 eq(x, cons(1, cons(2, NULL))),
                 eq(y, cons(1, cons(2, cons(3, NULL)))),
                 superset(x, y),
@@ -410,7 +410,7 @@ mod tests {
         );
 
         assert_eq!(
-            AsScheme(run_all(fresh(move |x, y| all([
+            AsScheme(run_all(|| fresh(move |x, y| all([
                 eq(x, cons(1, cons(2, cons(3, NULL)))),
                 eq(y, cons(1, cons(2, NULL))),
                 superset(x, y),
@@ -420,7 +420,7 @@ mod tests {
         );
 
         assert_eq!(
-            AsScheme(run_all(fresh(move |x| all([
+            AsScheme(run_all(|| fresh(move |x| all([
                 eq(x, cons(1, cons(2, cons(1, NULL)))),
                 set_minimal(x),
             ]))))
@@ -429,7 +429,7 @@ mod tests {
         );
 
         assert_eq!(
-            AsScheme(run_all(fresh(move |x| all([
+            AsScheme(run_all(|| fresh(move |x| all([
                 eq(x, cons(1, cons(2, cons(3, NULL)))),
                 set_minimal(x),
             ]))))
@@ -438,7 +438,7 @@ mod tests {
         );
 
         assert_eq!(
-            AsScheme(run_all(fresh(move |x| all([
+            AsScheme(run_all(|| fresh(move |x| all([
                 eq(x, cons(1, cons(2, cons(1, NULL)))),
                 set_minimal(x),
             ]))))
@@ -480,7 +480,7 @@ mod tests {
         assert_eq!(
             AsScheme(run(
                 1,
-                fresh(move |x, y, set| all([
+                || fresh(move |x, y, set| all([
                     eq(x, 1),
                     eq(y, 2),
                     contains(set, x),
