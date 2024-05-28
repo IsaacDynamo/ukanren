@@ -1,5 +1,9 @@
 // Run with: cargo run --example combinators --release
 
+#![allow(dead_code)]
+
+use std::ops::Deref;
+
 use kanren_rs::{display::*, *};
 
 goal!(
@@ -214,7 +218,7 @@ fn to_string(term: &Term) -> String {
     match term {
         Term::Null => "()".to_string(),
         Term::String(x) => x.clone(),
-        Term::Cons(a, b) => {
+        Term::Cons(_, _) => {
             let mut result = "(".to_string();
             let l = term.to_vec().unwrap();
             result.extend(l.iter().rev().map(|x| to_string(x)));
@@ -264,7 +268,7 @@ fn test_eval(input: &str, expected: &str) {
     println!("{} {:24} {:24} {} {}", mark, input, expected, equal, result);
 }
 
-fn main() {
+fn main2() {
     println!(
         "{} {:24} {:24} {} {}",
         " ", "Input", "Expected", "  ", "Result"
@@ -326,4 +330,115 @@ fn main() {
             fmt_lambda(&vars[1], &vars[2])
         );
     }
+}
+
+fn count_nodes(goal: &Goal) -> usize {
+    match goal {
+        Goal::Eq(_, _) => 1,
+        Goal::Neq(_, _) => 1,
+        Goal::Both(a, b) => count_nodes(a) + count_nodes(b),
+        Goal::Either(a, b) => count_nodes(a) + count_nodes(b),
+        Goal::Fresh(x) => {
+            match x.borrow().deref() {
+                FreshInner::Pending(_) => 0,
+                FreshInner::Resolved(x) => count_nodes(x),
+            }
+        },
+        Goal::Yield(x) => {
+            match x.borrow().deref() {
+                YieldInner::Pending(_) => 0,
+                YieldInner::Resolved(x) => count_nodes(x),
+            }
+        },
+    }
+}
+
+fn count_states(goal: &Goal) -> usize {
+    match goal {
+        Goal::Eq(_, _) => 1,
+        Goal::Neq(_, _) => 1,
+        Goal::Both(a, b) => count_states(a) * count_states(b),
+        Goal::Either(a, b) => count_states(a) + count_states(b),
+        Goal::Fresh(x) => {
+            match x.borrow().deref() {
+                FreshInner::Pending(_) => 1,
+                FreshInner::Resolved(x) => count_states(x),
+            }
+        },
+        Goal::Yield(x) => {
+            match x.borrow().deref() {
+                YieldInner::Pending(_) => 1,
+                YieldInner::Resolved(x) => count_states(x),
+            }
+        },
+    }
+}
+
+fn count_pending(goal: &Goal) -> usize {
+    match goal {
+        Goal::Eq(_, _) | Goal::Neq(_, _) => 0,
+        Goal::Both(a, b) => count_pending(a) + count_pending(b),
+        Goal::Either(a, b) => count_pending(a) + count_pending(b),
+        Goal::Fresh(x) => {
+            match x.borrow().deref() {
+                FreshInner::Pending(_) => 0,
+                FreshInner::Resolved(x) => count_pending(x),
+            }
+        },
+        Goal::Yield(x) => {
+            match x.borrow().deref() {
+                YieldInner::Pending(_) => 0,
+                YieldInner::Resolved(x) => 1 + count_pending(x),
+            }
+        },
+    }
+}
+
+
+// cargo build --example combinators --release && /usr/bin/time -v ./target/release/examples/combinators
+fn main() {
+    let mut result = query(|expr, vars, terms| {
+        all([
+            //list::at_least_two(vars),
+            //list::at_least_two(terms),
+            //fresh(move |tail| cond([[eq(expr, cons("S", tail))], [eq(expr, cons("K", tail))]])),
+            //eq(vars, list!("b", "a")),
+            //eq(terms, list!("a", "b")),
+            combs(expr),
+            eval(expr, vars, terms),
+        ])
+    });
+
+    for _ in 0..10 {
+        if let Some(state) = result.next() {
+            let vars = reify::<3>(&state);
+            println!(
+                "{:8} {} {} {} {} {} {} {} {}",
+                fmt_list(&vars[0]),
+                fmt_lambda(&vars[1], &vars[2]),
+                state.id.load(std::sync::atomic::Ordering::Relaxed),
+                state.depth,
+                result.stream.mature.len(),
+                result.stream.immature.len(),
+                count_nodes(&result.goal),
+                count_states(&result.goal),
+                count_pending(&result.goal),
+            );
+        }
+    }
+
+    use std::fs::File;
+
+    let mut file = File::create("comb.dot").expect("creation failed");
+    output_dot(&mut file, &result.goal).expect("wut");
+
+    use std::process::Command;
+
+    let out = Command::new("dot")
+            .args(["-Tsvg", "comb.dot", "-o", "comb.svg"])
+            .output()
+            .expect("failed to execute process");
+
+    println!("{:?}", out)
+
 }

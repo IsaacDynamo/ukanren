@@ -49,6 +49,12 @@ impl DisplayScheme for (Var, Term) {
 
 impl DisplayScheme for Term {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        (&self).fmt(f)
+    }
+}
+
+impl DisplayScheme for &Term {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         fn inner(term: &Term, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             match term {
                 Term::Null => Ok(()),
@@ -160,4 +166,98 @@ impl<'a> std::fmt::Display for GoalTree<'a> {
 
         inner(self.0, f, 0)
     }
+}
+
+
+use std::io::Write;
+
+pub fn output_dot(output: &mut impl Write, goal: &Goal) -> std::io::Result<()> {
+
+    fn id(goal: &Goal) -> usize {
+        goal as *const _ as usize
+    }
+
+    fn link(output: &mut impl Write, parent: &Goal, goal: &Goal) -> std::io::Result<()> {
+        if id(parent) != id(goal) {
+            output.write_fmt(format_args!("n{} -> n{}\n", id(parent), id(goal)))?;
+        }
+        Ok(())
+    }
+
+    fn inner(output: &mut impl Write, parent: &Goal, goal: &Goal) -> std::io::Result<()> {
+        match goal {
+            Goal::Eq(a, b) => {
+                output.write_fmt(format_args!("n{} [label=\"==\"]\n", id(goal)))?;
+                link(output, parent, goal)?;
+
+
+                let a = format!("{}", AsScheme(a)).escape_debug().collect::<String>();
+                let b = format!("{}", AsScheme(b)).escape_debug().collect::<String>();
+                output.write_fmt(format_args!("n{}_a [label=\"{}\" shape=box]\n", id(goal), a))?;
+                output.write_fmt(format_args!("n{} -> n{}_a\n", id(goal), id(goal)))?;
+                output.write_fmt(format_args!("n{}_b [label=\"{}\" shape=box]\n", id(goal), b))?;
+                output.write_fmt(format_args!("n{} -> n{}_b\n", id(goal), id(goal)))?;
+
+                Ok(())
+            },
+            Goal::Neq(_, _) => {
+                output.write_fmt(format_args!("n{} [label=\"!=\"]\n", id(goal)))?;
+                link(output, parent, goal)?;
+
+                Ok(())
+            },
+            Goal::Both(a, b) => {
+                if let Goal::Both(_, _) = parent {
+                    inner(output, parent, a)?;
+                    inner(output, parent, b)?;
+                } else {
+                    output.write_fmt(format_args!("n{} [label=\"&&\"]\n", id(goal)))?;
+                    link(output, parent, goal)?;
+                    inner(output, goal, a)?;
+                    inner(output, goal, b)?;
+                }
+                Ok(())
+            },
+            Goal::Either(a, b) => {
+                if let Goal::Either(_, _) = parent {
+                    inner(output, parent, a)?;
+                    inner(output, parent, b)?;
+                } else {
+                    output.write_fmt(format_args!("n{} [label=\"||\"]\n", id(goal)))?;
+                    link(output, parent, goal)?;
+                    inner(output, goal, a)?;
+                    inner(output, goal, b)?;
+                }
+                Ok(())
+            },
+            Goal::Fresh(i) => {
+                let i = i.borrow();
+                if let FreshInner::Resolved(x) = i.deref() {
+                    inner(output, parent, x)?;
+                } else {
+                    output.write_fmt(format_args!("n{} [label=\"Fresh\"]\n", id(goal)))?;
+                    link(output, parent, goal)?;
+                }
+                Ok(())
+            },
+            Goal::Yield(i) => {
+                let i = i.borrow();
+                if let YieldInner::Resolved(x) = i.deref() {
+                    output.write_fmt(format_args!("n{} [label=\"Yield: {}\"]\n", id(goal), std::rc::Rc::strong_count(x)))?;
+                    link(output, parent, goal)?;
+                    inner(output, goal, x)?;
+                } else {
+                    output.write_fmt(format_args!("n{} [label=\"Yield\"]\n", id(goal)))?;
+                    link(output, parent, goal)?;
+                }
+                Ok(())
+            },
+        }
+    }
+
+    output.write("digraph {\n".as_bytes())?;
+    inner(output, goal, goal)?;
+    output.write("}\n".as_bytes())?;
+
+    Ok(())
 }

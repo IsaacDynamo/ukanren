@@ -169,26 +169,26 @@ impl Unify {
     }
 
     fn unify(&mut self, a: &Term, b: &Term) -> Option<()> {
-        use Term::*;
+        use Term as T;
 
         let a = resolve(a, &self.map).clone();
         let b = resolve(b, &self.map).clone();
         match (a, b) {
-            (Var(a), Var(b)) if a == b => Some(()),
-            (Value(a), Value(b)) if a == b => Some(()),
-            (String(a), String(b)) if a == b => Some(()),
-            (Null, Null) => Some(()),
-            (Var(a), Var(b)) if a != b => {
+            (T::Var(a), T::Var(b)) if a == b => Some(()),
+            (T::Value(a), T::Value(b)) if a == b => Some(()),
+            (T::String(a), T::String(b)) if a == b => Some(()),
+            (T::Null, T::Null) => Some(()),
+            (T::Var(a), T::Var(b)) if a != b => {
                 let var = max(a, b);
                 let term = Term::Var(min(a, b));
                 self.extend(var, term);
                 Some(())
             }
-            (Var(var), term) | (term, Var(var)) => {
+            (T::Var(var), term) | (term, T::Var(var)) => {
                 self.extend(var, term);
                 Some(())
             }
-            (Cons(a_head, a_tail), Cons(b_head, b_tail)) => {
+            (T::Cons(a_head, a_tail), T::Cons(b_head, b_tail)) => {
                 self.unify(&a_head, &b_head)?;
                 self.unify(&a_tail, &b_tail)
             }
@@ -302,8 +302,8 @@ where
 
 #[derive(Default)]
 pub struct Stream {
-    mature: Vec<State>,
-    immature: Vec<Box<dyn FnOnce() -> Stream>>,
+    pub mature: Vec<State>,
+    pub immature: Vec<Box<dyn FnOnce() -> Stream>>,
 }
 
 impl Stream {
