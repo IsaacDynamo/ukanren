@@ -1,4 +1,4 @@
-use crate::{purify, reify, FreshInner, YieldInner};
+use crate::{purify, reify, FreshInner, TermType, YieldInner};
 use crate::{Goal, StateN, Term, Var};
 
 use std::fmt::Display;
@@ -70,9 +70,18 @@ impl DisplayScheme for &Term {
             }
         }
 
+        fn symbol(t: TermType) -> &'static str {
+            match t {
+                TermType::Any => "_",
+                TermType::Number => "#",
+                TermType::String => "*",
+            }
+        }
+
         match self {
-            Term::Var(x) => f.write_fmt(format_args!("_{}", x.0)),
+            Term::Var(x, t) => f.write_fmt(format_args!("{}{}", symbol(*t), x.0)),
             Term::Value(x) => f.write_fmt(format_args!("{x}")),
+            Term::Type(t) => f.write_str(symbol(*t)),
             Term::String(x) => {
                 if x.contains(' ') {
                     f.write_fmt(format_args!("\"{x}\""))

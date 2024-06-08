@@ -30,11 +30,19 @@ impl Var {
     }
 }
 
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub enum TermType {
+    Any,
+    Number,
+    String,
+}
+
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Term {
+    Type(TermType),
     Value(i32), // Todo make generic
     String(String),
-    Var(Var),
+    Var(Var, TermType),
     Cons(Rc<Term>, Rc<Term>),
     Null,
 }
@@ -70,7 +78,7 @@ impl From<i32> for Term {
 
 impl From<Var> for Term {
     fn from(var: Var) -> Self {
-        Self::Var(var)
+        Self::Var(var, TermType::Any)
     }
 }
 
@@ -97,6 +105,9 @@ pub fn cons(a: impl Into<Term>, b: impl Into<Term>) -> Term {
 }
 
 pub const NULL: Term = Term::Null;
+pub const NUM: Term = Term::Type(TermType::Number);
+pub const STR: Term = Term::Type(TermType::String);
+pub const ANY: Term = Term::Type(TermType::Any);
 
 #[macro_export]
 macro_rules! list {
@@ -129,9 +140,12 @@ type Mapping = HashMap<Var, Term>;
 fn resolve<'a>(term: &'a Term, map: &'a Mapping) -> &'a Term {
     use Term::*;
     match term {
-        Var(x) => {
+        Var(x, _) => {
             if let Some(q) = map.get(x) {
-                resolve(q, map)
+                match q {
+                    Term::Var(y, _) if x == y => q,
+                    _ => resolve(q, map)
+                }
             } else {
                 term
             }
@@ -146,6 +160,14 @@ fn deep_resolve(term: &Term, map: &Mapping) -> Term {
     match term {
         Term::Cons(a, b) => cons(deep_resolve(a, map), deep_resolve(b, map)),
         _ => term.clone(),
+    }
+}
+
+fn unify_type(a: TermType, b: TermType) -> Option<TermType> {
+    match (a, b) {
+        (a, b) if a == b => Some(a),
+        (TermType::Any, a) | (a, TermType::Any) => Some(a),
+        _ => None
     }
 }
 
@@ -171,20 +193,57 @@ impl Unify {
     fn unify(&mut self, a: &Term, b: &Term) -> Option<()> {
         use Term as T;
 
-        let a = resolve(a, &self.map).clone();
-        let b = resolve(b, &self.map).clone();
-        match (a, b) {
-            (T::Var(a), T::Var(b)) if a == b => Some(()),
+        let a_term = resolve(a, &self.map).clone();
+        let b_term = resolve(b, &self.map).clone();
+        match (a_term, b_term) {
+            (T::Var(a, a_type), T::Var(b, b_type)) if a == b => {
+                assert_eq!(a_type, b_type);
+                Some(())
+            },
             (T::Value(a), T::Value(b)) if a == b => Some(()),
             (T::String(a), T::String(b)) if a == b => Some(()),
+            (Term::Type(a), Term::Type(b)) if a == b => Some(()),
             (T::Null, T::Null) => Some(()),
-            (T::Var(a), T::Var(b)) if a != b => {
-                let var = max(a, b);
-                let term = Term::Var(min(a, b));
-                self.extend(var, term);
+
+            (NUM, T::Value(_)) | (T::Value(_), NUM) => Some(()),
+            (STR, T::String(_)) | (T::String(_), STR) => Some(()),
+            (ANY, term) | (term, ANY) if !matches!(term, Term::Var(_, _) | Term::Type(_)) => Some(()),
+
+            (T::Var(a, a_type), T::Var(b, b_type)) if a != b => {
+                let var_max = max(a, b);
+                let var_min = min(a, b);
+                if let Some(typ) = unify_type(a_type, b_type) {
+                    self.extend(var_max, Term::Var(var_min, typ));
+                    if typ != TermType::Any {
+                        self.extend(var_min, Term::Var(var_min, typ));
+                    }
+                    Some(())
+                } else {
+                    None
+                }
+            }
+
+            (T::Var(var, TermType::Any), Term::Type(typ)) | (Term::Type(typ), T::Var(var, TermType::Any)) => {
+                if typ != TermType::Any {
+                    self.extend(var, Term::Var(var, typ));
+                }
                 Some(())
             }
-            (T::Var(var), term) | (term, T::Var(var)) => {
+
+            (T::Var(_, var_type), Term::Type(term_type))
+                | (Term::Type(term_type), T::Var(_, var_type))
+                if var_type == term_type =>
+            {
+                Some(())
+            }
+
+            (T::Var(var, TermType::Any), term)
+                | (term, T::Var(var, TermType::Any))
+                | (T::Var(var, TermType::Number), term@ Term::Value(_))
+                | (term @ Term::Value(_), T::Var(var, TermType::Number))
+                | (T::Var(var, TermType::String), term @ Term::String(_))
+                | (term @ Term::String(_), T::Var(var, TermType::String))
+            => {
                 self.extend(var, term);
                 Some(())
             }
@@ -210,7 +269,7 @@ pub struct State {
 
 impl State {
     pub fn resolve(&self, v: Var) -> Term {
-        let term = Term::Var(v);
+        let term = Term::Var(v, TermType::Any);
         deep_resolve(&term, &self.map)
     }
 
@@ -248,6 +307,14 @@ pub fn eq(a: impl Into<Term>, b: impl Into<Term>) -> Goal {
 
 pub fn neq(a: impl Into<Term>, b: impl Into<Term>) -> Goal {
     Goal::Neq(a.into(), b.into())
+}
+
+pub fn num(a: impl Into<Term>) -> Goal {
+    Goal::Eq(a.into(), NUM)
+}
+
+pub fn str(a: impl Into<Term>) -> Goal {
+    Goal::Eq(a.into(), STR)
 }
 
 pub fn both(a: Goal, b: Goal) -> Goal {
@@ -355,7 +422,7 @@ fn verify(map: &Mapping, constraints: &Constraints, new: &mut Constraints) -> bo
     for elements in constraints {
         let mut u = Unify::new(map.clone());
         let x = elements.iter().fold(Some(()), |r, element| {
-            r.and_then(|_| u.unify(&Term::Var(element.0), &element.1))
+            r.and_then(|_| u.unify(&Term::Var(element.0, TermType::Any), &element.1))
         });
 
         if x.is_some() {
@@ -644,7 +711,7 @@ pub fn purify<const N: usize>(state: &State) -> Constraints {
                     insert(set, a);
                     insert(set, b);
                 }
-                Term::Var(v) => _ = set.insert(*v),
+                Term::Var(v, _) => _ = set.insert(*v),
                 _ => (),
             }
         }
@@ -668,7 +735,7 @@ pub fn purify<const N: usize>(state: &State) -> Constraints {
                                     Term::Cons(a, b) => {
                                         only_reachable(a, set) && only_reachable(b, set)
                                     }
-                                    Term::Var(v) => set.contains(v),
+                                    Term::Var(v, _) => set.contains(v),
                                     _ => true,
                                 }
                             }

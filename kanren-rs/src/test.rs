@@ -21,7 +21,7 @@ mod tests {
         );
         assert_eq!(
             format!("{:?}", unify(&Var(1).into(), &Var(2).into(), &e)),
-            "Some({Var(2): Var(Var(1))})"
+            "Some({Var(2): Var(Var(1), Any)})"
         );
         assert_eq!(format!("{:?}", unify(&NULL, &NULL, &e)), "Some({})");
         assert_eq!(
@@ -39,8 +39,111 @@ mod tests {
         );
         assert_eq!(
             format!("{:?}", unify(&cons(1, Var(1)), &cons(1, Var(2)), &e)),
-            "Some({Var(2): Var(Var(1))})"
+            "Some({Var(2): Var(Var(1), Any)})"
         );
+    }
+
+    #[test]
+    fn test_type_unify() {
+        fn unify(a: &Term, b: &Term, map: &Mapping) -> Option<Mapping> {
+            let mut u = Unify::new(map.clone());
+            u.unify(a, b).map(|_| u.map)
+        }
+
+        let e = Mapping::default();
+        assert_eq!(unify(&ANY, &Term::Value(1), &e), Some(HashMap::new()));
+        assert_eq!(unify(&ANY, &Term::String("hi".to_string()), &e), Some(HashMap::new()));
+        assert_eq!(unify(&ANY, &list!(1), &e), Some(HashMap::new()));
+        assert_eq!(unify(&ANY, &NULL, &e), Some(HashMap::new()));
+
+        assert_eq!(unify(&ANY, &Term::Var(Var(1), TermType::Any), &e), Some(HashMap::new()));
+        assert_eq!(unify(&ANY, &Term::Var(Var(1), TermType::Number), &e), None);
+        assert_eq!(unify(&ANY, &Term::Var(Var(1), TermType::String), &e), None);
+
+        assert_eq!(unify(&ANY, &ANY, &e), Some(HashMap::new()));
+        assert_eq!(unify(&ANY, &NUM, &e), None);
+        assert_eq!(unify(&ANY, &STR, &e), None);
+
+        assert_eq!(unify(&NUM, &Term::Value(1), &e), Some(HashMap::new()));
+        assert_eq!(unify(&NUM, &Term::String("hi".to_string()), &e), None);
+        assert_eq!(unify(&NUM, &list!(1), &e), None);
+        assert_eq!(unify(&NUM, &NULL, &e), None);
+
+        assert_eq!(unify(&NUM, &Term::Var(Var(1), TermType::Any), &e), Some(HashMap::from_iter([(Var(1), Term::Var(Var(1), TermType::Number))].into_iter())));
+        assert_eq!(unify(&NUM, &Term::Var(Var(1), TermType::Number), &e), Some(HashMap::new()));
+        assert_eq!(unify(&NUM, &Term::Var(Var(1), TermType::String), &e), None);
+
+        assert_eq!(unify(&NUM, &ANY, &e), None);
+        assert_eq!(unify(&NUM, &NUM, &e), Some(HashMap::new()));
+        assert_eq!(unify(&NUM, &STR, &e), None);
+
+        assert_eq!(unify(&STR, &Term::Value(1), &e), None);
+        assert_eq!(unify(&STR, &Term::String("hi".to_string()), &e), Some(HashMap::new()));
+        assert_eq!(unify(&STR, &list!(1), &e), None);
+        assert_eq!(unify(&STR, &NULL, &e), None);
+
+        assert_eq!(unify(&STR, &Term::Var(Var(1), TermType::Any), &e), Some(HashMap::from_iter([(Var(1), Term::Var(Var(1), TermType::String))].into_iter())));
+        assert_eq!(unify(&STR, &Term::Var(Var(1), TermType::Number), &e), None);
+        assert_eq!(unify(&STR, &Term::Var(Var(1), TermType::String), &e), Some(HashMap::new()));
+
+        assert_eq!(unify(&STR, &ANY, &e), None);
+        assert_eq!(unify(&STR, &NUM, &e), None);
+        assert_eq!(unify(&STR, &STR, &e), Some(HashMap::new()));
+    }
+
+    #[test]
+    fn test_number_display() {
+        assert_eq!(AsScheme(run_all(|| num(1))).to_string(), "(())");
+        assert_eq!(AsScheme(run_all(|| num(""))).to_string(), "()");
+        assert_eq!(AsScheme(run_all(|x| num(x))).to_string(), "((#0))");
+    }
+
+    #[test]
+    fn test_type_display() {
+        assert_eq!(AsScheme(run_all(|x| eq(x, list!(ANY, ANY)))).to_string(), "(((_ _)))");
+        assert_eq!(AsScheme(run_all(|x| eq(x, list!(NUM, NUM)))).to_string(), "(((# #)))");
+        assert_eq!(AsScheme(run_all(|x| eq(x, list!(STR, STR)))).to_string(), "(((* *)))");
+        assert_eq!(AsScheme(run_all(|x| eq(x, list!(ANY, . ANY)))).to_string(), "(((_ . _)))");
+        assert_eq!(AsScheme(run_all(|x, y| all([eq(x, list!(y, y)), eq(y, NUM) ]))).to_string(), "(((#1 #1) #1))");
+
+        let result = run(10, |result| {
+            fresh(move |a, b, c| { all(vec![
+                eq(result, list![a, b, c]),
+                num(b)
+            ])})
+        });
+        assert_eq!(AsScheme(result).to_string(), "(((_1 #2 _3)))");
+    }
+
+    #[test]
+    fn test_number_eq() {
+        assert_eq!(AsScheme(run_all(|x| all([eq(x, 1), num(x)]) )).to_string(), "((1))");
+        assert_eq!(AsScheme(run_all(|x| all([num(x), eq(x, 1)]) )).to_string(), "((1))");
+        assert_eq!(AsScheme(run_all(|x, y| all([
+            eq(list!(x, y), list!(1, NUM)),
+            eq(list!(x, y), list!(NUM, 2))
+        ]))).to_string(), "((1 2))");
+
+        assert_eq!(AsScheme(run_all(|x, y| all([
+            num(x),
+            num(y),
+        ]))).to_string(), "((#0 #1))");
+
+        assert_eq!(AsScheme(run_all(|x, y| all([
+            num(x),
+            num(y),
+            eq(x, y)
+        ]))).to_string(), "((#0 #0))");
+
+        assert_eq!(AsScheme(run_all(|x, y| all([num(x), str(y), eq(x, y)]) )).to_string(), "()");
+    }
+
+    #[test]
+    fn test_number_neq() {
+        assert_eq!(AsScheme(run_all(|x| all([neq(x, NUM)]) )).to_string(), "((_0) : (((_0 . #0))))"); // (_0 . #0) -> (_0 . #)
+        assert_eq!(AsScheme(run_all(|x| all([neq(x, NUM), neq(x, STR)]) )).to_string(), "((_0) : (((_0 . #0)) ((_0 . *0))))");
+        assert_eq!(AsScheme(run_all(|x| all([neq(x, 1), num(x)]) )).to_string(), "((#0) : (((_0 . 1))))");
+        assert_eq!(AsScheme(run_all(|x| all([num(x), neq(x, 1),]) )).to_string(), "((#0) : (((_0 . 1))))");
     }
 
     #[test]
